@@ -152,9 +152,9 @@ func sanityCheck() error {
 func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
 	t0 := time.Now().Truncate(time.Millisecond)
 
-	pebbleDir, socketPath := getEnvPaths()
+	paths := getEnvPaths()
 	if rcmd.CreateDirs {
-		err := os.MkdirAll(pebbleDir, 0755)
+		err := os.MkdirAll(paths.PebbleDir, 0755)
 		if err != nil {
 			return err
 		}
@@ -166,8 +166,9 @@ func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
 	}
 
 	dopts := daemon.Options{
-		Dir:                 pebbleDir,
-		SocketPath:          socketPath,
+		Dir:                 paths.PebbleDir,
+		SocketPath:          paths.SocketPath,
+		ImportDirs:          paths.ImportDirs,
 		AdditionalAdminUIDs: additionalAdminUIDs,
 	}
 	if rcmd.Verbose {

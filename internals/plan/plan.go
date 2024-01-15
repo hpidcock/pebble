@@ -1021,7 +1021,16 @@ func validServiceAction(action ServiceAction, additionalValid ...ServiceAction) 
 
 var fnameExp = regexp.MustCompile("^([0-9]{3})-([a-z](?:-?[a-z0-9]){2,}).yaml$")
 
-func ReadLayersDir(dirname string) ([]*Layer, error) {
+type layerReader struct {
+	labels map[string]string
+	offset int
+}
+
+func (lr *layerReader) ReadDir(dirname string) ([]*Layer, error) {
+	if lr.labels == nil {
+		lr.labels = make(map[string]string)
+	}
+
 	finfos, err := ioutil.ReadDir(dirname)
 	if err != nil {
 		// Errors from package os generally include the path.
@@ -1029,74 +1038,84 @@ func ReadLayersDir(dirname string) ([]*Layer, error) {
 	}
 
 	orders := make(map[int]string)
-	labels := make(map[string]int)
 
 	// Documentation says ReadDir result is already sorted by name.
 	// This is fundamental here so if reading changes make sure the
 	// sorting is preserved.
 	var layers []*Layer
 	for _, finfo := range finfos {
-		if finfo.IsDir() || !strings.HasSuffix(finfo.Name(), ".yaml") {
+		fileName := finfo.Name()
+		if finfo.IsDir() || !strings.HasSuffix(fileName, ".yaml") {
 			continue
 		}
 		// TODO Consider enforcing permissions and ownership here to
 		//      avoid mistakes that could lead to hacks.
-		match := fnameExp.FindStringSubmatch(finfo.Name())
+		match := fnameExp.FindStringSubmatch(fileName)
 		if match == nil {
-			return nil, fmt.Errorf("invalid layer filename: %q (must look like \"123-some-label.yaml\")", finfo.Name())
+			return nil, fmt.Errorf("invalid layer filename: %q (must look like \"123-some-label.yaml\")", fileName)
 		}
 
-		data, err := ioutil.ReadFile(filepath.Join(dirname, finfo.Name()))
+		filePath := filepath.Join(dirname, fileName)
+		data, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			// Errors from package os generally include the path.
 			return nil, fmt.Errorf("cannot read layer file: %v", err)
 		}
 		label := match[2]
-		order, err := strconv.Atoi(match[1])
+		localOrder, err := strconv.Atoi(match[1])
 		if err != nil {
 			panic(fmt.Sprintf("internal error: filename regexp is wrong: %v", err))
 		}
 
-		oldLabel, dupOrder := orders[order]
-		oldOrder, dupLabel := labels[label]
-		if dupOrder {
-			oldOrder = order
-		} else if dupLabel {
-			oldLabel = label
+		if prevFile, dupOrder := orders[localOrder]; dupOrder {
+			return nil, fmt.Errorf("invalid layer filename: %q not unique (have %q already with same order %d)",
+				fileName, prevFile, localOrder)
 		}
-		if dupOrder || dupLabel {
-			return nil, fmt.Errorf("invalid layer filename: %q not unique (have \"%03d-%s.yaml\" already)", finfo.Name(), oldOrder, oldLabel)
+		if prevFile, dupLabel := lr.labels[label]; dupLabel {
+			return nil, fmt.Errorf("invalid layer filename: %q not unique (have %q already with same label %q)",
+				fileName, prevFile, label)
 		}
+		orders[localOrder] = fileName
+		lr.labels[label] = filePath
 
-		orders[order] = label
-		labels[label] = order
-
-		layer, err := ParseLayer(order, label, data)
+		// globalOrder of the layers must be maintained when using import paths.
+		globalOrder := lr.offset + localOrder
+		layer, err := ParseLayer(globalOrder, label, data)
 		if err != nil {
 			return nil, err
 		}
 		layers = append(layers, layer)
 	}
+	if len(layers) > 0 {
+		lr.offset = layers[len(layers)-1].Order + 1
+	}
 	return layers, nil
 }
 
-// ReadDir reads the configuration layers from the "layers" sub-directory in
-// dir, and returns the resulting Plan. If the "layers" sub-directory doesn't
-// exist, it returns a valid Plan with no layers.
-func ReadDir(dir string) (*Plan, error) {
-	layersDir := filepath.Join(dir, "layers")
-	_, err := os.Stat(layersDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Plan{}, nil
+// ReadAll reads the configuration layers from the "layers" sub-directory in
+// each directory in dirs, and returns the resulting Plan. If the "layers"
+// sub-directory doesn't exist, no layers are loaded from that directory.
+// Each directory in dirs is loaded in the order they are passed.
+func ReadAll(dirs []string) (*Plan, error) {
+	var layers []*Layer
+
+	lr := &layerReader{}
+	for _, dir := range dirs {
+		layersDir := filepath.Join(dir, "layers")
+		_, err := os.Stat(layersDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		return nil, err
+		loadedLayers, err := lr.ReadDir(layersDir)
+		if err != nil {
+			return nil, err
+		}
+		layers = append(layers, loadedLayers...)
 	}
 
-	layers, err := ReadLayersDir(layersDir)
-	if err != nil {
-		return nil, err
-	}
 	combined, err := CombineLayers(layers...)
 	if err != nil {
 		return nil, err

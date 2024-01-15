@@ -152,7 +152,10 @@ func (s *PebbleSuite) TestEnterExecListDir(c *C) {
 		}
 	}
 
-	restore := fakeArgs("pebble", "enter", "exec", "ls", s.pebbleDir)
+	// Pass -T and -I to exec to prevent different behaviour depending on test environment.
+	// Pass -C and -1 to ensure the ls implementation only prints one column of files like the
+	// expected output.
+	restore := fakeArgs("pebble", "enter", "exec", "-T", "-I", "--", "ls", "-C", "-1", s.pebbleDir)
 	defer restore()
 
 	exitCode := cli.PebbleMain()
@@ -170,7 +173,7 @@ func (s *PebbleSuite) TestEnterExecReadServiceOutputFile(c *C) {
 		cat msg1
 		cat msg2
 	`
-	cmd := []string{"pebble", "enter", "--run", "exec", "--",
+	cmd := []string{"pebble", "enter", "--run", "exec", "-T", "-I", "--",
 		"bash", "-c", script, "bash", s.pebbleDir}
 	restore := fakeArgs(cmd...)
 	defer restore()
