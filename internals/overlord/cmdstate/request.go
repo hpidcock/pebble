@@ -29,6 +29,9 @@ import (
 	"github.com/canonical/pebble/internals/overlord/state"
 )
 
+// environ is a var so it can be overridden in tests.
+var environ = osutil.Environ
+
 // ExecArgs holds the arguments for a command execution.
 type ExecArgs struct {
 	Command     []string
@@ -75,7 +78,7 @@ func Exec(st *state.State, args *ExecArgs) (*state.Task, ExecMetadata, error) {
 	// Inherit the pebble daemon environment.
 	// If the user is being changed, unset the HOME and USER env vars so that they
 	// can be set correctly later on in this method.
-	environment := osutil.Environ()
+	environment := environ()
 	if args.UserID != nil && *args.UserID != os.Getuid() {
 		delete(environment, "HOME")
 		delete(environment, "USER")

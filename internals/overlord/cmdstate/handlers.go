@@ -39,8 +39,10 @@ import (
 	"github.com/canonical/pebble/internals/wsutil"
 )
 
+// connectTimeout is a var so it can be overridden in tests.
+var connectTimeout = 5 * time.Second
+
 const (
-	connectTimeout   = 5 * time.Second
 	handshakeTimeout = 5 * time.Second
 	waitDelay        = time.Second
 
