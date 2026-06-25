@@ -2,7 +2,7 @@
 # Integration test runner for container-based Pebble command tests.
 #
 # Usage:
-#   ./main.sh [--pebblebin <path>]
+#   ./main.sh [--pebblebin <path>] [<test-name>]
 #
 # Each sub-directory contains a Containerfile and a test.sh that exercises one
 # Pebble command. This script:
@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 PEBBLE_BIN=""
+SELECTED_TEST=""
 PASS=0
 FAIL=0
 FAILED_TESTS=()
@@ -35,10 +36,18 @@ while [[ $# -gt 0 ]]; do
             PEBBLE_BIN="${1#*=}"
             shift
             ;;
-        *)
+        -*)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 [--pebblebin <path>]" >&2
+            echo "Usage: $0 [--pebblebin <path>] [<test-name>]" >&2
             exit 1
+            ;;
+        *)
+            if [[ -n "$SELECTED_TEST" ]]; then
+                echo "Only one test name may be specified" >&2
+                exit 1
+            fi
+            SELECTED_TEST="$1"
+            shift
             ;;
     esac
 done
@@ -117,11 +126,20 @@ run_test() {
     fi
 }
 
-for test_dir in "$SCRIPT_DIR"/*/; do
-    if [[ -f "${test_dir}/Containerfile" ]]; then
-        run_test "$test_dir"
+if [[ -n "$SELECTED_TEST" ]]; then
+    test_dir="$SCRIPT_DIR/$SELECTED_TEST"
+    if [[ ! -f "${test_dir}/Containerfile" ]]; then
+        echo "No test found for '${SELECTED_TEST}' (looked for ${test_dir}/Containerfile)" >&2
+        exit 1
     fi
-done
+    run_test "$test_dir"
+else
+    for test_dir in "$SCRIPT_DIR"/*/; do
+        if [[ -f "${test_dir}/Containerfile" ]]; then
+            run_test "$test_dir"
+        fi
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Summary

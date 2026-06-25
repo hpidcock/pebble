@@ -1,0 +1,18 @@
+FROM ubuntu:24.04
+
+# Install bash (already present in ubuntu, but be explicit) and no other deps
+# are needed since the pebble binary is statically linked.
+RUN apt-get update && apt-get install -y --no-install-recommends bash && \
+    rm -rf /var/lib/apt/lists/*
+
+# Inject the pre-compiled, statically-linked Pebble binary.
+# The build context contains a file named "pebble" placed there by the Go test
+# framework before invoking podman build.
+COPY pebble /usr/local/bin/pebble
+RUN chmod +x /usr/local/bin/pebble
+
+# Copy the test script.
+COPY test.sh /test.sh
+RUN chmod +x /test.sh
+
+ENTRYPOINT ["/test.sh"]
