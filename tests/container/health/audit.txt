@@ -1,0 +1,19 @@
+# begin test_health_all_healthy
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_health_all_healthy
+# begin test_health_level_filter
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_health_level_filter
+# begin test_health_no_checks
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_health_no_checks
+# begin test_health_unhealthy
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_health_unhealthy

@@ -1,0 +1,24 @@
+# begin check_format_json
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end check_format_json
+# begin check_format_yaml
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end check_format_yaml
+# begin check_refresh
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end check_refresh
+# begin check_shows_check
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end check_shows_check
+# begin check_unknown
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end check_unknown

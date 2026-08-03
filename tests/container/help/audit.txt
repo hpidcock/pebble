@@ -1,0 +1,13 @@
+# begin test_help_all
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+# end test_help_all
+# begin test_help_command_help_flag
+# end test_help_command_help_flag
+# begin test_help_default
+# end test_help_default
+# begin test_help_flag
+# end test_help_flag
+# begin test_help_specific_command
+# end test_help_specific_command
+# begin test_help_unknown_command
+# end test_help_unknown_command

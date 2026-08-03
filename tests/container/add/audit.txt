@@ -1,0 +1,12 @@
+# begin test_add_appends_layer
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_add_appends_layer
+# begin test_add_combine
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_add_combine
+# begin test_add_no_label
+# end test_add_no_label

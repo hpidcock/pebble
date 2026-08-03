@@ -1,0 +1,20 @@
+# begin update_identities_no_from
+# end update_identities_no_from
+# begin update_identities_replace_adds
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/alice.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end update_identities_replace_adds
+# begin update_identities_replace_removes
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/remove.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end update_identities_replace_removes
+# begin update_identities_updates
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/update.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end update_identities_updates

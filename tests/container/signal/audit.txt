@@ -1,0 +1,14 @@
+# begin test_signal_invalid_signal
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_signal_invalid_signal
+# begin test_signal_sends_sigusr1
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_signal_sends_sigusr1
+# begin test_signal_unknown_service
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_signal_unknown_service

@@ -4,54 +4,7 @@
 # exits non-zero if any fail.
 set -u
 
-PEBBLE_BIN=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_empty <string> <test-name>
-assert_not_empty() {
-    if [ -z "$1" ]; then
-        fail "$2" "expected non-empty output"
-        return 1
-    fi
-    return 0
-}
-
-# write_layer <pebble-dir> <filename> <yaml>
-# Writes <yaml> to <pebble-dir>/layers/<filename>, creating the directory if
-# needed.
-write_layer() {
-    local dir="$1"
-    local filename="$2"
-    local yaml="$3"
-    mkdir -p "${dir}/layers"
-    printf '%s\n' "$yaml" > "${dir}/layers/${filename}"
-}
+source /base.sh
 
 # ---------------------------------------------------------------------------
 # Subtests
@@ -65,7 +18,7 @@ test_enter_version() {
     local dir
     dir=$(mktemp -d)
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter version --client 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter version --client 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -82,7 +35,7 @@ test_enter_exec() {
     local dir
     dir=$(mktemp -d)
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter exec -T -I -- echo hello-enter 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter exec -T -I -- echo hello-enter 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -106,7 +59,7 @@ services:
 "
 
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter plan 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter plan 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -130,7 +83,7 @@ services:
 "
 
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter services 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter services 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -146,7 +99,7 @@ test_enter_ls() {
     local dir
     dir=$(mktemp -d)
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter ls /tmp 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter ls /tmp 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -175,7 +128,7 @@ services:
     # --run starts default services before executing the subcommand.
     # We use exec to cat the sentinel file written by svc1 on startup.
     # enter waits for services to be running before handing off to exec.
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter --run exec -T -I -- cat "$sentinel" 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter --run exec -T -I -- cat "$sentinel" 2>&1) || code=$?
     rm -rf "$dir"
 
     assert_exit 0 "$code" "$name" || return
@@ -204,7 +157,7 @@ services:
 
     local out code=0
     # --hold suppresses autostart of startup:enabled services.
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter --hold exec -T -I -- /bin/true 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter --hold exec -T -I -- /bin/true 2>&1) || code=$?
 
     local sentinel_exists=0
     [ -f "$sentinel" ] && sentinel_exists=1
@@ -226,7 +179,7 @@ test_enter_unsupported_subcommand() {
     local dir
     dir=$(mktemp -d)
     local out code=0
-    out=$(PEBBLE="$dir" "$PEBBLE_BIN" enter changes 2>&1) || code=$?
+    out=$(PEBBLE="$dir" "$PEBBLE" enter changes 2>&1) || code=$?
     rm -rf "$dir"
 
     if [ "$code" -eq 0 ]; then
@@ -240,16 +193,13 @@ test_enter_unsupported_subcommand() {
 # Runner
 # ---------------------------------------------------------------------------
 
-test_enter_version
-test_enter_exec
-test_enter_plan
-test_enter_services
-test_enter_ls
-test_enter_run_starts_services
-test_enter_hold
-test_enter_unsupported_subcommand
+run_subtest test_enter_version
+run_subtest test_enter_exec
+run_subtest test_enter_plan
+run_subtest test_enter_services
+run_subtest test_enter_ls
+run_subtest test_enter_run_starts_services
+run_subtest test_enter_hold
+run_subtest test_enter_unsupported_subcommand
 
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

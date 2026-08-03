@@ -1,0 +1,25 @@
+# begin test_checks_empty
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_checks_empty
+# begin test_checks_format_json
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_checks_format_json
+# begin test_checks_format_yaml
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_checks_format_yaml
+# begin test_checks_level_filter
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_checks_level_filter
+# begin test_checks_lists_check
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_checks_lists_check

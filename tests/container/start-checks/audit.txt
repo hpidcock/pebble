@@ -1,0 +1,14 @@
+# begin start_checks_idempotent
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end start_checks_idempotent
+# begin start_checks_starts_check
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end start_checks_starts_check
+# begin start_checks_unknown
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end start_checks_unknown

@@ -1,0 +1,35 @@
+# begin test_ls_directory_itself
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_directory_itself
+# begin test_ls_format_json
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_format_json
+# begin test_ls_format_yaml
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_format_yaml
+# begin test_ls_glob
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_glob
+# begin test_ls_lists_directory
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_lists_directory
+# begin test_ls_long_format
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_long_format
+# begin test_ls_nonexistent
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_ls_nonexistent

@@ -1,0 +1,15 @@
+# begin test_restart_no_wait
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_restart_no_wait
+# begin test_restart_restarts_service
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_restart_restarts_service
+# begin test_restart_unknown_service
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_restart_unknown_service

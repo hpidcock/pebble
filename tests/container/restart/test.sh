@@ -1,89 +1,6 @@
 #!/bin/bash
 # Integration tests for `pebble restart` and its argument variations.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir>
-# Starts the pebble daemon in the background, stores its PID in DAEMON_PID,
-# and polls for the socket for up to 10 s (100 × 0.1 s).
-start_daemon() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE" run --create-dirs \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Kills the daemon started by start_daemon and waits for it to exit.
-stop_daemon() {
-    kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
-}
-
-# write_layer <dir> <filename> <yaml>
-# Writes <yaml> to <dir>/layers/<filename>.
-write_layer() {
-    local dir="$1"
-    local filename="$2"
-    local yaml="$3"
-    mkdir -p "${dir}/layers"
-    printf '%s\n' "$yaml" >"${dir}/layers/${filename}"
-}
-
-# ---------------------------------------------------------------------------
-# Subtests
-# ---------------------------------------------------------------------------
+source /base.sh
 
 # pebble restart <service>
 # Starts svc1, calls `pebble restart svc1`, expects exit 0 and the service
@@ -194,15 +111,8 @@ test_restart_unknown_service() {
     pass "$name"
 }
 
-# ---------------------------------------------------------------------------
-# Runner
-# ---------------------------------------------------------------------------
+run_subtest test_restart_restarts_service
+run_subtest test_restart_no_wait
+run_subtest test_restart_unknown_service
 
-test_restart_restarts_service
-test_restart_no_wait
-test_restart_unknown_service
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

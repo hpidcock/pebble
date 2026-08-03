@@ -1,0 +1,13 @@
+# begin remove_identities_no_from
+# end remove_identities_no_from
+# begin remove_identities_removes
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/remove.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end remove_identities_removes
+# begin remove_identities_unknown
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/remove.yaml, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end remove_identities_unknown

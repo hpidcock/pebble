@@ -1,90 +1,6 @@
 #!/bin/bash
 # Integration tests for `pebble plan` and its interactions with layers.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE_BIN=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir>
-# Starts `pebble run` in the background, stores the PID in DAEMON_PID, and
-# polls for the Unix socket to appear (up to 100 × 0.1 s = 10 s).
-# Caller must set TEST_NAME before calling so that timeout failures are
-# attributed correctly.
-start_daemon() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE_BIN" run --create-dirs \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            fail "$TEST_NAME" "timed out waiting for pebble socket at $socket"
-            kill "$DAEMON_PID" 2>/dev/null
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Kills the daemon started by start_daemon and waits for it to exit.
-stop_daemon() {
-    kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
-}
-
-# write_layer <pebble_dir> <filename> <yaml>
-# Writes <yaml> to <pebble_dir>/layers/<filename>, creating the directory if
-# needed.
-write_layer() {
-    local dir="$1"
-    local filename="$2"
-    local yaml="$3"
-    mkdir -p "${dir}/layers"
-    printf '%s' "$yaml" >"${dir}/layers/${filename}"
-}
+source /base.sh
 
 # ---------------------------------------------------------------------------
 # Subtests
@@ -102,7 +18,7 @@ test_plan_empty() {
     start_daemon "$pebble_dir" || { rm -rf "$pebble_dir"; return; }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" plan 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" plan 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -137,7 +53,7 @@ test_plan_shows_services() {
     start_daemon "$pebble_dir" || { rm -rf "$pebble_dir"; return; }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" plan 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" plan 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -170,7 +86,7 @@ test_plan_reflects_added_layer() {
 " >"$layer_file"
 
     local add_out add_code=0
-    add_out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" add svc2-layer "$layer_file" 2>&1) || add_code=$?
+    add_out=$(PEBBLE="$pebble_dir" "$PEBBLE" add svc2-layer "$layer_file" 2>&1) || add_code=$?
     rm -f "$layer_file"
 
     if [ "$add_code" -ne 0 ]; then
@@ -181,7 +97,7 @@ test_plan_reflects_added_layer() {
     fi
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" plan 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" plan 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -196,11 +112,8 @@ test_plan_reflects_added_layer() {
 # Runner
 # ---------------------------------------------------------------------------
 
-test_plan_empty
-test_plan_shows_services
-test_plan_reflects_added_layer
+run_subtest test_plan_empty
+run_subtest test_plan_shows_services
+run_subtest test_plan_reflects_added_layer
 
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

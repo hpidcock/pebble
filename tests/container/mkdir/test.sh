@@ -1,85 +1,5 @@
 #!/bin/bash
-# Integration tests for `pebble mkdir` and its argument variations.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE_BIN=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir>
-# Starts the pebble daemon in the background, saves its PID in DAEMON_PID,
-# and polls up to 10 s for the Unix socket to appear.
-DAEMON_PID=
-start_daemon() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE_BIN" run --create-dirs \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            echo "      daemon log:" >&2
-            cat "${pebble_dir}/daemon.log" >&2
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Kills the daemon started by start_daemon and waits for it to exit.
-stop_daemon() {
-    if [ -n "$DAEMON_PID" ]; then
-        kill "$DAEMON_PID" 2>/dev/null
-        wait "$DAEMON_PID" 2>/dev/null
-        DAEMON_PID=
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# Subtests
-# ---------------------------------------------------------------------------
+source /base.sh
 
 # pebble mkdir <path> — creates a directory on the daemon's filesystem.
 test_mkdir_creates_directory() {
@@ -94,7 +14,7 @@ test_mkdir_creates_directory() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir /tmp/pebble-mkdir-test 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir /tmp/pebble-mkdir-test 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -120,7 +40,7 @@ test_mkdir_parents() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir -p /tmp/pebble-mkdir-deep/a/b/c 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir -p /tmp/pebble-mkdir-deep/a/b/c 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -146,7 +66,7 @@ test_mkdir_already_exists_fails() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir /tmp 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir /tmp 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -171,7 +91,7 @@ test_mkdir_already_exists_with_p() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir -p /tmp 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir -p /tmp 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -193,7 +113,7 @@ test_mkdir_mode() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir -m 700 /tmp/pebble-mkdir-mode 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir -m 700 /tmp/pebble-mkdir-mode 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -219,7 +139,7 @@ test_mkdir_user_group() {
     }
 
     local out code=0
-    out=$(PEBBLE="$pebble_dir" "$PEBBLE_BIN" mkdir --uid=0 --gid=0 /tmp/pebble-mkdir-ugtest 2>&1) || code=$?
+    out=$(PEBBLE="$pebble_dir" "$PEBBLE" mkdir --uid=0 --gid=0 /tmp/pebble-mkdir-ugtest 2>&1) || code=$?
 
     stop_daemon
     rm -rf "$pebble_dir"
@@ -232,18 +152,11 @@ test_mkdir_user_group() {
     pass "$name"
 }
 
-# ---------------------------------------------------------------------------
-# Runner
-# ---------------------------------------------------------------------------
+run_subtest test_mkdir_creates_directory
+run_subtest test_mkdir_parents
+run_subtest test_mkdir_already_exists_fails
+run_subtest test_mkdir_already_exists_with_p
+run_subtest test_mkdir_mode
+run_subtest test_mkdir_user_group
 
-test_mkdir_creates_directory
-test_mkdir_parents
-test_mkdir_already_exists_fails
-test_mkdir_already_exists_with_p
-test_mkdir_mode
-test_mkdir_user_group
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

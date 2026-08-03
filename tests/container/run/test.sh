@@ -1,68 +1,5 @@
 #!/bin/bash
-# Integration tests for `pebble run` and its flag variations.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# wait_for_socket <socket-path> <test-name>
-# Polls up to 10 s (100 × 0.1 s) for the Unix socket to appear.
-# Returns non-zero and calls fail() on timeout.
-wait_for_socket() {
-    local socket="$1"
-    local name="$2"
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            fail "$name" "timed out waiting for pebble socket at $socket"
-            return 1
-        fi
-    done
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# Subtests
-# ---------------------------------------------------------------------------
+source /base.sh
 
 # Start daemon with --create-dirs; verify that the Unix socket appears.
 run_socket_appears() {
@@ -305,18 +242,11 @@ EOF
     pass "$name"
 }
 
-# ---------------------------------------------------------------------------
-# Runner
-# ---------------------------------------------------------------------------
+run_subtest run_socket_appears
+run_subtest run_create_dirs
+run_subtest run_hold
+run_subtest run_http
+run_subtest run_verbose
+run_subtest run_args
 
-run_socket_appears
-run_create_dirs
-run_hold
-run_http
-run_verbose
-run_args
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

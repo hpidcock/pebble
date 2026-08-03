@@ -1,46 +1,6 @@
 #!/bin/bash
 # Integration tests for `pebble version` and its argument variations.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
+source /base.sh
 
 # ---------------------------------------------------------------------------
 # Subtests
@@ -191,15 +151,12 @@ test_version_extra_args_error() {
 # Runner
 # ---------------------------------------------------------------------------
 
-test_version_default
-test_version_client_flag
-test_version_json_client
-test_version_yaml_client
-test_version_global_flag
-test_version_with_server
-test_version_extra_args_error
+run_subtest test_version_default
+run_subtest test_version_client_flag
+run_subtest test_version_json_client
+run_subtest test_version_yaml_client
+run_subtest test_version_global_flag
+run_subtest test_version_with_server
+run_subtest test_version_extra_args_error
 
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

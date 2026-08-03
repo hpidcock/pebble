@@ -1,0 +1,17 @@
+# begin test_replan_no_wait
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_replan_no_wait
+# begin test_replan_starts_enabled_service
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_replan_starts_enabled_service
+# begin test_replan_starts_new_service
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_replan_starts_new_service

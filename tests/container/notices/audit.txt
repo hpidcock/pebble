@@ -1,0 +1,39 @@
+# begin test_notices_empty
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_empty
+# begin test_notices_format_json
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_format_json
+# begin test_notices_key_filter
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_key_filter
+# begin test_notices_lists_notice
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+mkdir(/root/.config)
+mkdir(/root/.config/pebble)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_lists_notice
+# begin test_notices_timeout
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_timeout
+# begin test_notices_type_filter
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notices_type_filter

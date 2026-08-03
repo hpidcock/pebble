@@ -1,0 +1,21 @@
+# begin test_version_client_flag
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+# end test_version_client_flag
+# begin test_version_default
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+# end test_version_default
+# begin test_version_extra_args_error
+# end test_version_extra_args_error
+# begin test_version_global_flag
+# end test_version_global_flag
+# begin test_version_json_client
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+# end test_version_json_client
+# begin test_version_with_server
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_version_with_server
+# begin test_version_yaml_client
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+# end test_version_yaml_client

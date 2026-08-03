@@ -1,0 +1,23 @@
+# begin test_okay_acknowledges_notices
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+mkdir(/root/.config)
+mkdir(/root/.config/pebble)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_okay_acknowledges_notices
+# begin test_okay_clears_warnings
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_okay_clears_warnings
+# begin test_okay_no_notices
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+# end test_okay_no_notices
+# begin test_okay_warnings_flag
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+# end test_okay_warnings_flag

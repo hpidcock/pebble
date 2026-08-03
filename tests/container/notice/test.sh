@@ -5,73 +5,7 @@
 # exits non-zero if any fail.
 set -u
 
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir>
-# Starts `pebble run` in the background, stores its PID in DAEMON_PID, and
-# polls the socket until it appears (up to 10 s / 100 × 0.1 s).
-# Returns 1 (and leaves DAEMON_PID unset) if the socket never appears.
-start_daemon() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE" run --create-dirs \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Sends SIGTERM to DAEMON_PID and waits for it to exit.
-stop_daemon() {
-    kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
-}
+source /base.sh
 
 # ---------------------------------------------------------------------------
 # Subtests
@@ -234,12 +168,9 @@ test_notice_format_json() {
 # Runner
 # ---------------------------------------------------------------------------
 
-test_notice_by_id
-test_notice_by_type_and_key
-test_notice_unknown_id
-test_notice_format_json
+run_subtest test_notice_by_id
+run_subtest test_notice_by_type_and_key
+run_subtest test_notice_unknown_id
+run_subtest test_notice_format_json
 
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

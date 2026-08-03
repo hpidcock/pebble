@@ -1,0 +1,20 @@
+# begin add_identities_adds
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/identities.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end add_identities_adds
+# begin add_identities_duplicate
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/identities.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end add_identities_duplicate
+# begin add_identities_multiple
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat($TMPDIR/identities.yaml, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end add_identities_multiple
+# begin add_identities_no_from
+# end add_identities_no_from

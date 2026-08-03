@@ -4,81 +4,7 @@
 # exits non-zero if any fail.
 set -u
 
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir> [--identities=<file>]
-# Starts the pebble daemon in the background, stores its PID in DAEMON_PID,
-# and polls for the socket to appear (up to 100 × 0.1 s = 10 s).
-# Returns 1 (and sets the test to fail) if the socket never appears.
-# The caller must pass the test name as $3 for the timeout failure message.
-start_daemon() {
-    local pebble_dir="$1"
-    local extra_args="${2:-}"
-    local test_name="${3:-start_daemon}"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE" run --create-dirs $extra_args \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            fail "$test_name" "timed out waiting for pebble socket at $socket"
-            stop_daemon
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Kills the daemon started by start_daemon and waits for it to exit.
-stop_daemon() {
-    if [ -n "${DAEMON_PID:-}" ]; then
-        kill "$DAEMON_PID" 2>/dev/null
-        wait "$DAEMON_PID" 2>/dev/null
-        DAEMON_PID=
-    fi
-}
+source /base.sh
 
 # ---------------------------------------------------------------------------
 # Subtests
@@ -100,7 +26,7 @@ identities:
             user-id: 42
 EOF
 
-    start_daemon "$pebble_dir" "--identities=${seed_file}" "$name" || { rm -rf "$pebble_dir"; return; }
+    start_daemon "$pebble_dir" "--identities=${seed_file}" || { rm -rf "$pebble_dir"; return; }
 
     # Write the removal YAML: bob must be null to signal removal.
     local remove_file="${pebble_dir}/remove.yaml"
@@ -122,7 +48,7 @@ EOF
     assert_contains "Removed" "$out" "$name" || { rm -rf "$pebble_dir"; return; }
 
     # Start daemon again (without seed) and confirm bob is gone.
-    start_daemon "$pebble_dir" "" "$name" || { rm -rf "$pebble_dir"; return; }
+    start_daemon "$pebble_dir" || { rm -rf "$pebble_dir"; return; }
     local list_out list_code=0
     list_out=$(PEBBLE="$pebble_dir" "$PEBBLE" identities 2>&1) || list_code=$?
     stop_daemon
@@ -140,7 +66,7 @@ remove_identities_unknown() {
     local pebble_dir
     pebble_dir=$(mktemp -d)
 
-    start_daemon "$pebble_dir" "" "$name" || { rm -rf "$pebble_dir"; return; }
+    start_daemon "$pebble_dir" || { rm -rf "$pebble_dir"; return; }
 
     local remove_file="${pebble_dir}/remove.yaml"
     cat >"$remove_file" <<'EOF'
@@ -178,11 +104,8 @@ remove_identities_no_from() {
 # Runner
 # ---------------------------------------------------------------------------
 
-remove_identities_removes
-remove_identities_unknown
-remove_identities_no_from
+run_subtest remove_identities_removes
+run_subtest remove_identities_unknown
+run_subtest remove_identities_no_from
 
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish

@@ -1,0 +1,33 @@
+FROM ubuntu:24.04
+
+# Install all tools needed by the test harness and audit machinery.
+# The pebble binary itself is statically linked so no runtime libs are needed.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        bash \
+        curl \
+        strace \
+        gawk \
+        python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+# ---- Shared test harness ----
+# All files are copied from tests/container/base/ into every test image.
+
+# Thin strace wrapper: used by run_subtest in base.sh to trace only the
+# pebble binary, not the shell or other tools.
+COPY pebble-trace.sh /usr/local/bin/pebble-trace
+RUN chmod +x /usr/local/bin/pebble-trace
+
+# AWK summariser: reduces raw strace output to a stable golden summary.
+COPY summarise-audit.awk /usr/local/share/summarise-audit.awk
+
+# Shared harness: assertion helpers, daemon helpers, run_subtest, finish.
+# Installed at /base.sh so test scripts source it with: source /base.sh
+COPY base.sh /base.sh
+
+# ---- Pebble binary ----
+# Copied into the base image so every test image inherits it without needing
+# its own COPY instruction. main.sh stages the binary into base/ before build.
+COPY pebble /usr/local/bin/pebble
+RUN chmod +x /usr/local/bin/pebble

@@ -2,15 +2,20 @@
 # Integration test runner for container-based Pebble command tests.
 #
 # Usage:
-#   ./main.sh [--pebblebin <path>] [<test-name>]
+#   ./main.sh [--pebblebin <path>] [--update-audit] [<test-name>]
 #
-# Each sub-directory contains a Containerfile and a test.sh that exercises one
-# Pebble command. This script:
+# Each sub-directory contains a Containerfile, a test.sh, and an audit.txt.
+# This script:
 #   1. Builds the Pebble binary (CGO_ENABLED=0) if --pebblebin is not given.
-#   2. Iterates over every sub-directory that contains a Containerfile.
-#   3. Builds the OCI image with podman.
-#   4. Runs the container and collects the exit code.
-#   5. Reports a summary and exits non-zero if any test failed.
+#   2. Builds the shared base image (pebble-test-base) if not already present.
+#   3. Iterates over every sub-directory that contains a Containerfile.
+#   4. Builds the test image FROM pebble-test-base.
+#   5. Runs the container (functional tests + audit in one pass).
+#   6. Reports a summary and exits non-zero if any test failed.
+#
+# --update-audit:
+#   Runs the container with the test directory bind-mounted to /audit and
+#   UPDATE_AUDIT=1 so the golden file is written back to the host.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +23,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 PEBBLE_BIN=""
 SELECTED_TEST=""
+UPDATE_AUDIT=0
 PASS=0
 FAIL=0
 FAILED_TESTS=()
@@ -36,9 +42,13 @@ while [[ $# -gt 0 ]]; do
             PEBBLE_BIN="${1#*=}"
             shift
             ;;
+        --update-audit)
+            UPDATE_AUDIT=1
+            shift
+            ;;
         -*)
             echo "Unknown argument: $1" >&2
-            echo "Usage: $0 [--pebblebin <path>] [<test-name>]" >&2
+            echo "Usage: $0 [--pebblebin <path>] [--update-audit] [<test-name>]" >&2
             exit 1
             ;;
         *)
@@ -61,13 +71,35 @@ if [[ -z "$PEBBLE_BIN" ]]; then
     echo "Building Pebble binary (CGO_ENABLED=0)..."
     CGO_ENABLED=0 GOOS=linux go build -o "$PEBBLE_BIN" "$REPO_ROOT/cmd/pebble"
     echo "Built Pebble binary at: $PEBBLE_BIN"
-    # Clean up the temporary binary on exit.
     trap 'rm -f "$PEBBLE_BIN"' EXIT
 else
     echo "Using pre-built Pebble binary at: $PEBBLE_BIN"
 fi
 
 PEBBLE_BIN="$(realpath "$PEBBLE_BIN")"
+
+# ---------------------------------------------------------------------------
+# Build the shared base image (includes the pebble binary)
+# ---------------------------------------------------------------------------
+
+BASE_TAG="pebble-test-base"
+echo ""
+echo "=== base image ==="
+
+# Stage the pebble binary into the base build context so it gets baked in.
+cp "$PEBBLE_BIN" "${SCRIPT_DIR}/base/pebble"
+trap 'rm -f "${SCRIPT_DIR}/base/pebble"' EXIT
+
+base_build_output=$(podman build \
+        --tag "$BASE_TAG" \
+        --file "${SCRIPT_DIR}/base/Containerfile" \
+        "${SCRIPT_DIR}/base" 2>&1) || {
+    echo "$base_build_output"
+    echo "FAIL: base image build failed"
+    exit 1
+}
+rm -f "${SCRIPT_DIR}/base/pebble"
+echo "Base image ready: $BASE_TAG"
 
 # ---------------------------------------------------------------------------
 # Run each test directory
@@ -82,18 +114,28 @@ run_test() {
     echo ""
     echo "=== $name ==="
 
-    # Stage the binary into the build context directory, then clean it up
-    # regardless of outcome.
-    local staged="${test_dir}/pebble"
-    cp "$PEBBLE_BIN" "$staged"
+    # In update mode we don't need audit.txt in the build context (the bind-
+    # mount provides it at runtime).  In normal mode it must exist to be baked
+    # into the image.
+    if [[ "$UPDATE_AUDIT" -eq 0 ]] && [[ ! -f "${test_dir}/audit.txt" ]]; then
+        echo "FAIL: $name (no audit.txt — run with --update-audit to create it)"
+        FAIL=$((FAIL + 1))
+        FAILED_TESTS+=("$name")
+        return
+    fi
 
-    cleanup_image() {
-        rm -f "$staged"
+    # In update mode, ensure audit.txt exists so the Containerfile COPY
+    # succeeds (the container will overwrite it via the bind-mount).
+    if [[ "$UPDATE_AUDIT" -eq 1 ]] && [[ ! -f "${test_dir}/audit.txt" ]]; then
+        touch "${test_dir}/audit.txt"
+    fi
+
+    cleanup() {
         podman rmi --force "$tag" >/dev/null 2>&1 || true
     }
-    trap cleanup_image RETURN
+    trap cleanup RETURN
 
-    # Build the image; suppress output unless it fails.
+    # Build the test image; suppress output unless it fails.
     local build_output
     local build_code=0
     build_output=$(podman build \
@@ -108,16 +150,28 @@ run_test() {
         return
     fi
 
-    # Run the container; capture output and exit code without aborting the
-    # script on non-zero exit (we handle it ourselves).
+    # Run the container.
     local output
     local code=0
-    output=$(podman run --rm "$tag" 2>&1) || code=$?
+    if [[ "$UPDATE_AUDIT" -eq 1 ]]; then
+        # Bind-mount the test directory to /audit so the entrypoint can write
+        # the golden file back to the host filesystem.
+        output=$(podman run --rm \
+            -e UPDATE_AUDIT=1 \
+            -v "${test_dir}:/audit:z" \
+            "$tag" 2>&1) || code=$?
+    else
+        output=$(podman run --rm "$tag" 2>&1) || code=$?
+    fi
 
     echo "$output"
 
     if [[ "$code" -eq 0 ]]; then
-        echo "PASS: $name"
+        if [[ "$UPDATE_AUDIT" -eq 1 ]]; then
+            echo "UPDATED: $name"
+        else
+            echo "PASS: $name"
+        fi
         PASS=$((PASS + 1))
     else
         echo "FAIL: $name (container exited with code $code)"
@@ -135,6 +189,8 @@ if [[ -n "$SELECTED_TEST" ]]; then
     run_test "$test_dir"
 else
     for test_dir in "$SCRIPT_DIR"/*/; do
+        # Skip the base directory — it's not a test.
+        [[ "$(basename "$test_dir")" == "base" ]] && continue
         if [[ -f "${test_dir}/Containerfile" ]]; then
             run_test "$test_dir"
         fi

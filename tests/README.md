@@ -39,21 +39,27 @@ These tests are gated behind the `container_integration` build tag and require
 
 ```
 tests/container/
-├── main.sh               # Runner: builds images, runs containers, reports results
+├── main.sh               # Runner: builds base + test images, runs containers
+├── base/
+│   ├── Containerfile     # FROM ubuntu:24.04; installs tools + pebble binary
+│   ├── base.sh           # Shared harness: helpers, run_subtest, finish
+│   ├── pebble-trace.sh   # strace wrapper used by run_subtest for audit
+│   └── summarise-audit.awk  # Normalises raw strace output to golden format
 └── version/
-    ├── Containerfile     # OCI image definition (FROM ubuntu:24.04)
-    └── test.sh           # Shell script with subtests; prints PASS/FAIL lines
+    ├── Containerfile     # FROM pebble-test-base; copies test.sh + audit.txt
+    ├── test.sh           # Sources /base.sh; defines subtests; calls run_subtest
+    └── audit.txt         # Golden syscall summary, one block per subtest
 ```
 
 Each command under test gets its own sub-directory containing:
 
 | File | Purpose |
 |---|---|
-| `Containerfile` | Inherits from `ubuntu:24.04` (or `scratch`), copies in the `pebble` binary and `test.sh` |
-| `test.sh` | Exercises the command and prints `PASS: <name>` / `FAIL: <name>` lines |
+| `Containerfile` | `FROM pebble-test-base`; copies `test.sh` and `audit.txt` |
+| `test.sh` | `source /base.sh`; defines subtest functions; calls `run_subtest` for each |
+| `audit.txt` | Golden file with one `# begin`/`# end` block per subtest |
 
-`main.sh` discovers every sub-directory that contains a `Containerfile`,
-builds the image, runs the container, and reports a summary.
+`main.sh` builds the base image once, then builds and runs each test image in sequence.
 
 ### Requirements
 
@@ -75,13 +81,58 @@ CGO_ENABLED=0 go build -o /tmp/pebble ./cmd/pebble
 bash tests/container/main.sh --pebblebin /tmp/pebble
 ```
 
+### Syscall audit
+
+Audit tracing is built into every normal test run — there is no separate audit
+image or second pass. Each `run_subtest` call in `test.sh` automatically:
+1. Points `$PEBBLE` at `pebble-trace` (the strace wrapper) for the duration
+   of that subtest, so only the pebble binary is traced.
+2. Summarises the captured syscalls with `summarise-audit.awk`.
+3. Compares the summary against the matching `# begin`/`# end` block in
+   `audit.txt` and fails the subtest if they differ.
+
+The golden file has one block per subtest, sorted alphabetically:
+
+```
+# begin test_version_with_server
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_version_with_server
+```
+
+To generate or regenerate golden files:
+
+```bash
+# Regenerate all golden files
+bash tests/container/main.sh --update-audit
+
+# Regenerate one test's golden file
+bash tests/container/main.sh --update-audit version
+```
+
+The summariser (`base/summarise-audit.awk`) strips noise (Go runtime
+`/proc/self` reads, daemon-internal state files, timing-dependent kernel
+reads, etc.), normalises variable paths (`$PEBBLE_DIR`, `$TMPDIR`, `$HOME`),
+deduplicates, and sorts so diffs are minimal and meaningful.
+
 ### Adding a new command test
 
-1. Create `tests/container/<command>/Containerfile` — use `FROM ubuntu:24.04`.
+1. Create `tests/container/<command>/Containerfile`:
+   ```dockerfile
+   FROM pebble-test-base
+   COPY test.sh /test.sh
+   RUN chmod +x /test.sh
+   COPY audit.txt /audit.txt
+   ENTRYPOINT ["/bin/bash", "/test.sh"]
+   ```
 2. Create `tests/container/<command>/test.sh` — copy the pattern from
-   `version/test.sh`: define subtests as shell functions, each calling
-   `pass`/`fail`, then invoke them at the bottom.
-3. `main.sh` will discover and run it automatically.
+   `version/test.sh`: `source /base.sh`, define subtests, call
+   `run_subtest <fn>` for each, end with `finish`.
+3. Create an empty `tests/container/<command>/audit.txt` placeholder.
+4. Run `bash tests/container/main.sh --update-audit <command>` to populate
+   the golden file, then commit `audit.txt` alongside the test.
+5. `main.sh` will discover and run it automatically.
 
 ---
 

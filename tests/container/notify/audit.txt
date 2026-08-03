@@ -1,0 +1,21 @@
+# begin test_notify_no_key
+# end test_notify_no_key
+# begin test_notify_records_notice
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+mkdir(/root/.config)
+mkdir(/root/.config/pebble)
+openat(/etc/localtime, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+openat(/root/.config/pebble/cli.json, O_WRONLY|O_CREAT|O_TRUNC)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notify_records_notice
+# begin test_notify_repeat_after
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notify_repeat_after
+# begin test_notify_with_data
+connect(AF_UNIX, $PEBBLE_DIR/.pebble.socket)
+openat(/root/.config/pebble/cli.json, O_RDONLY)
+socket(AF_UNIX, SOCK_STREAM)
+# end test_notify_with_data

@@ -1,121 +1,6 @@
 #!/bin/bash
 # Integration tests for `pebble replan` and its flag variations.
-# Each subtest is a function; the framework at the bottom runs them all and
-# exits non-zero if any fail.
-set -u
-
-PEBBLE=/usr/local/bin/pebble
-PASS=0
-FAIL=0
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; echo "      reason: $2"; FAIL=$((FAIL + 1)); }
-
-# assert_exit <expected> <actual> <test-name>
-assert_exit() {
-    if [ "$1" != "$2" ]; then
-        fail "$3" "expected exit code $1, got $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_contains <substring> <string> <test-name>
-assert_contains() {
-    if ! echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# assert_not_contains <substring> <string> <test-name>
-assert_not_contains() {
-    if echo "$2" | grep -qF "$1"; then
-        fail "$3" "expected output NOT to contain $(printf '%q' "$1"), got: $2"
-        return 1
-    fi
-    return 0
-}
-
-# start_daemon <pebble_dir>
-# Starts the pebble daemon with --hold (services do not autostart) and waits
-# up to 10 s for the Unix socket to appear.  Sets DAEMON_PID on success.
-DAEMON_PID=
-start_daemon() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE" run --create-dirs --hold \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            echo "  [daemon log]"
-            cat "${pebble_dir}/daemon.log" || true
-            return 1
-        fi
-    done
-    return 0
-}
-
-# start_daemon_autostart <pebble_dir>
-# Starts the pebble daemon without --hold so services with startup: enabled
-# are started automatically.  Sets DAEMON_PID on success.
-start_daemon_autostart() {
-    local pebble_dir="$1"
-    local socket="${pebble_dir}/.pebble.socket"
-
-    PEBBLE="$pebble_dir" "$PEBBLE" run --create-dirs \
-        >"${pebble_dir}/daemon.log" 2>&1 &
-    DAEMON_PID=$!
-
-    local waited=0
-    while [ ! -S "$socket" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-        if [ "$waited" -ge 100 ]; then
-            echo "  [daemon log]"
-            cat "${pebble_dir}/daemon.log" || true
-            return 1
-        fi
-    done
-    return 0
-}
-
-# stop_daemon
-# Kills the daemon started by start_daemon / start_daemon_autostart and waits
-# for it to exit.
-stop_daemon() {
-    if [ -n "$DAEMON_PID" ]; then
-        kill "$DAEMON_PID" 2>/dev/null
-        wait "$DAEMON_PID" 2>/dev/null
-        DAEMON_PID=
-    fi
-}
-
-# write_layer <dir> <filename> <yaml>
-# Writes <yaml> to <dir>/layers/<filename>, creating the layers directory if
-# necessary.
-write_layer() {
-    local dir="$1"
-    local filename="$2"
-    local yaml="$3"
-    mkdir -p "${dir}/layers"
-    printf '%s\n' "$yaml" >"${dir}/layers/${filename}"
-}
-
-# ---------------------------------------------------------------------------
-# Subtests
-# ---------------------------------------------------------------------------
+source /base.sh
 
 # pebble replan starts a service whose startup is enabled.
 # The daemon is started with --hold so autostart has not run; replan should
@@ -133,7 +18,7 @@ services:
         startup: enabled
 "
 
-    if ! start_daemon "$pebble_dir"; then
+    if ! start_daemon "$pebble_dir" --hold; then
         fail "$name" "timed out waiting for pebble socket at ${pebble_dir}/.pebble.socket"
         rm -rf "$pebble_dir"
         return
@@ -172,7 +57,7 @@ services:
         startup: enabled
 "
 
-    if ! start_daemon "$pebble_dir"; then
+    if ! start_daemon "$pebble_dir" --hold; then
         fail "$name" "timed out waiting for pebble socket at ${pebble_dir}/.pebble.socket"
         rm -rf "$pebble_dir"
         return
@@ -210,7 +95,7 @@ services:
         startup: disabled
 "
 
-    if ! start_daemon "$pebble_dir"; then
+    if ! start_daemon "$pebble_dir" --hold; then
         fail "$name" "timed out waiting for pebble socket at ${pebble_dir}/.pebble.socket"
         rm -rf "$pebble_dir"
         return
@@ -246,15 +131,8 @@ services:
     pass "$name"
 }
 
-# ---------------------------------------------------------------------------
-# Runner
-# ---------------------------------------------------------------------------
+run_subtest test_replan_starts_enabled_service
+run_subtest test_replan_no_wait
+run_subtest test_replan_starts_new_service
 
-test_replan_starts_enabled_service
-test_replan_no_wait
-test_replan_starts_new_service
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-
-[ "$FAIL" -eq 0 ]
+finish
