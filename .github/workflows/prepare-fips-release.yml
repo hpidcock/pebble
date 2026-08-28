@@ -1,0 +1,200 @@
+name: Prepare FIPS release
+
+# Second level of release automation, for the fips branch.
+#
+# Once the non-FIPS "Binaries" workflow finishes running for a published
+# release, this merges that release's tag into the `fips` branch (resolving
+# conflicts with the opencode GitHub Action) and opens a pull request for the
+# merge. Once approved and its checks pass, GitHub's native auto-merge
+# feature merges it with a true merge commit (not squash), preserving fips
+# branch history as described in HACKING.md.
+#
+# When that merge lands, the "FIPS release PR merged" workflow
+# (fips-release-pr-merged.yml -> draft-release.yml) tags `fips` and drafts
+# the FIPS GitHub release.
+#
+# Prerequisites (repository configuration, not covered by this file):
+#   - "Allow auto-merge" enabled in Settings -> General.
+#   - Branch protection on `fips` requiring at least one approving review
+#     before merging.
+#   - The `OPENROUTER_API_KEY` secret for the opencode GitHub Action.
+#
+# Note: this uses the default GITHUB_TOKEN (via the `permissions:` below),
+# rather than a separate bot/PAT token. See the equivalent note in
+# prepare-release.yml for the consequence: the merge PR opened below won't
+# automatically get CI status checks, since GitHub doesn't trigger workflows
+# off of pull requests/branches/pushes made with the default GITHUB_TOKEN.
+
+on:
+  workflow_run:
+    workflows: ["Binaries"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge-into-fips:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch fips branch and all tags
+        run: git fetch origin fips '+refs/tags/*:refs/tags/*'
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6
+        with:
+          go-version-file: "go.mod"
+          cache: false
+
+      - name: Determine released tag
+        id: tag
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          TAG=$(git tag --points-at "$HEAD_SHA" | grep -v -- '-fips' || true)
+          TAG=$(echo "$TAG" | head -n 1)
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [[ -z "$TAG" ]]; then
+            echo "::notice::No non-FIPS release tag found at ${HEAD_SHA}; nothing to do (this is expected for FIPS releases)."
+          fi
+
+      - name: Configure git identity
+        if: steps.tag.outputs.tag != ''
+        run: |
+          git config user.name "pebble-release-bot"
+          git config user.email "pebble-release-bot@users.noreply.github.com"
+
+      - name: Merge tag into fips branch
+        id: merge
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          BRANCH="fips-merge/${TAG}"
+          git checkout -b "$BRANCH" "origin/fips"
+          if git merge --no-ff --no-commit "$TAG"; then
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve conflicts with opencode
+        if: steps.tag.outputs.tag != '' && steps.merge.outputs.conflicts == 'true'
+        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a  # latest (github-v1.2.19)
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/google/gemini-3.7-flash
+          prompt: |
+            This repository checkout is in the middle of a git merge with
+            conflicts: merging tag ${{ steps.tag.outputs.tag }} into the fips
+            branch.
+
+            Run `git status` to find every conflicted file, and resolve all
+            of them, using this guidance:
+
+            - The fips branch intentionally excludes standard TLS/crypto
+              functionality in favour of FIPS-approved alternatives. Whenever
+              a conflict touches TLS or crypto code, resolve it by dropping
+              the incoming TLS/crypto usage/functionality rather than
+              reintroducing it, adapting surrounding code as needed so it
+              still builds and makes sense without it.
+            - The fips branch also intentionally carries its own
+              infrastructure differences from master (for example CI
+              workflow files under .github/workflows that target the fips
+              branch instead of master, and other fips-specific build/CI
+              configuration). For conflicts in this kind of infrastructure
+              file, prefer the fips branch's side unless the incoming change
+              is clearly an unrelated improvement that should carry over
+              (e.g. fixing an unrelated bug in a shared step) -- use your
+              judgement, and keep any fips-specific customization intact.
+            - For all other conflicts (regular application code, docs,
+              tests, etc. with no TLS/crypto/infrastructure angle), take the
+              incoming change from ${{ steps.tag.outputs.tag }}.
+
+            After resolving every conflict: make sure no conflict markers
+            (<<<<<<<, =======, >>>>>>>) remain anywhere, make sure
+            `go build ./...` succeeds, and `git add` every resolved file.
+
+            Do not commit, push, or open a pull request yourself -- leave the
+            resolved changes staged.
+
+      - name: Verify conflicts are resolved
+        if: steps.tag.outputs.tag != '' && steps.merge.outputs.conflicts == 'true'
+        run: |
+          set -eu
+          if grep -RIl --exclude-dir=.git -e '^<<<<<<< ' -e '^=======$' -e '^>>>>>>> ' .; then
+            echo "::error::Conflict markers remain after opencode resolution"
+            exit 1
+          fi
+          if git diff --cached --quiet; then
+            echo "::error::No staged changes after conflict resolution"
+            exit 1
+          fi
+          go build ./...
+
+      - name: Bump version for FIPS release
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -eu
+          sed -i "s/^var Version = \".*\"\$/var Version = \"${TAG}-fips\"/" cmd/version.go
+          grep -qF "var Version = \"${TAG}-fips\"" cmd/version.go
+          git add cmd/version.go
+
+      - name: Commit merge
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          git commit -m "chore: merge ${TAG} into fips branch"
+
+      - name: Create fips-release label
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create automated-fips-release \
+            --color 5319E7 \
+            --description "Automated merge of a release tag into the fips branch" \
+            --force
+
+      - name: Push branch and open pull request
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git push origin "$BRANCH"
+          PR_URL=$(gh pr create \
+            --base fips \
+            --head "$BRANCH" \
+            --title "chore: merge ${TAG} into fips branch" \
+            --body "Automated merge of ${TAG} into fips, in preparation for the ${TAG}-fips release.
+
+          Conflicts (if any) were resolved by dropping TLS and crypto usages from the merged code; please review carefully." \
+            --label automated-fips-release)
+          echo "Opened $PR_URL"
+
+          # Requires branch protection + "Allow auto-merge". Uses a true merge
+          # commit (not squash) to preserve fips branch history.
+          gh pr merge --merge --auto "$PR_URL"

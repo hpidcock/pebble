@@ -1,0 +1,26 @@
+name: Release PR merged
+
+# Watches for the automated version-bump pull request (opened by
+# prepare-release.yml) landing on master, and hands off to the reusable
+# draft-release.yml workflow to tag master and draft a GitHub release.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    if: >
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'automated-release')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/draft-release.yml
+    secrets: inherit
+    with:
+      target-branch: master
+      fips: false

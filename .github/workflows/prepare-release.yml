@@ -1,0 +1,113 @@
+name: Prepare release
+
+# Automates the first step of "Creating a release" in HACKING.md: it bumps
+# `Version` in cmd/version.go on `master`, and opens a pull request for that
+# change.
+#
+# Once the PR is approved and its required status checks pass, GitHub's
+# native auto-merge feature (enabled by the last step below) squash-merges it
+# automatically. When that merge lands, the "Draft release" workflow
+# (release-pr-merged.yml -> draft-release.yml) takes over: it tags `master`
+# and drafts a GitHub release.
+#
+# Prerequisites (repository configuration, not covered by this file):
+#   - "Allow auto-merge" enabled in Settings -> General.
+#   - Branch protection on `master` requiring at least one approving review
+#     before merging.
+#
+# Note: this uses the default GITHUB_TOKEN (via the `permissions:` below),
+# rather than a separate bot/PAT token. That keeps setup simple, but it has a
+# consequence: GitHub does not run other workflows (e.g. Tests, Lint) off of
+# pull requests/branches/pushes made with the default GITHUB_TOKEN, to avoid
+# recursive workflow runs. So the version-bump PR opened below will *not*
+# automatically get CI status checks. If you want CI to gate the auto-merge
+# too, either configure a bot token/GitHub App for this workflow instead, or
+# have a maintainer trigger the checks manually (e.g. push an empty commit,
+# or close and reopen the PR) before it's approved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v1.33.0"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '$VERSION' must look like vX.Y.Z"
+            exit 1
+          fi
+
+      - name: Checkout master
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Update cmd/version.go
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          sed -i "s/^var Version = \".*\"\$/var Version = \"${VERSION}\"/" cmd/version.go
+          grep -qF "var Version = \"${VERSION}\"" cmd/version.go
+
+      - name: Create release label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create automated-release \
+            --color 0E8A16 \
+            --description "Automated version bump for a Pebble release" \
+            --force
+
+      - name: Commit and push release branch
+        id: branch
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          BRANCH="release/${VERSION}"
+          git config user.name "pebble-release-bot"
+          git config user.email "pebble-release-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git commit -am "chore: bump version to ${VERSION}"
+          git push origin "$BRANCH"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request and enable auto-merge
+        env:
+          VERSION: ${{ inputs.version }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          PR_URL=$(gh pr create \
+            --base master \
+            --head "$BRANCH" \
+            --title "chore: bump version to ${VERSION}" \
+            --body "Automated version bump for the ${VERSION} release.
+
+          Once this is approved and merged, a draft GitHub release will be created automatically." \
+            --label automated-release)
+          echo "Opened $PR_URL"
+
+          # Requires branch protection + "Allow auto-merge" to actually wait
+          # for approval/checks; otherwise this merges right away.
+          gh pr merge --squash --auto "$PR_URL"

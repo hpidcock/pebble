@@ -269,27 +269,47 @@ Recommended tone:
 
 ## Creating a release
 
-When releasing, you need to release the `master` branch and the `fips` branch.
+When releasing, you need to release the `master` branch and the `fips` branch. Most of this is automated by a chain of GitHub Actions; see below for what's automated and what's still manual.
 
 Binaries will be created and uploaded automatically to this release by the [binaries.yml](https://github.com/canonical/pebble/blob/master/.github/workflows/binaries.yml) GitHub Action. In addition, a new Snap version is built and uploaded to the [Snap Store](https://snapcraft.io/pebble) (but promotion to `stable` is a manual step).
 
-Follow these steps:
+### Automation overview
+
+```mermaid
+flowchart TD
+    A[prepare-release.yml\nworkflow_dispatch] --> B[version bump PR on master\nauto-merge: squash]
+    B --> C[release-pr-merged.yml]
+    C --> D[draft-release.yml\ntags master, drafts release]
+    D --> E[human publishes the\ndraft release]
+    E --> F[binaries.yml release event\nbuilds + uploads binaries/snap]
+    F --> G[prepare-fips-release.yml\nworkflow_run]
+    G --> H[merge tag into fips PR\nopencode resolves conflicts\nauto-merge: true merge]
+    H --> I[fips-release-pr-merged.yml]
+    I --> J[draft-release.yml\ntags fips, drafts FIPS release]
+    J --> K[human publishes the\nFIPS draft release]
+```
+
+- `prepare-release.yml` bumps `Version` in `cmd/version.go` and opens a PR for it, then enables GitHub's auto-merge so it squash-merges itself once approved and CI passes.
+- `release-pr-merged.yml` (triggered when that PR merges) hands off to the reusable `draft-release.yml`, which tags the tip of `master` and drafts a GitHub release, using [opencode](https://opencode.ai) to write the title and notes (with previous non-FIPS releases as style examples).
+- Once you publish that draft and `binaries.yml` finishes running for it, `prepare-fips-release.yml` merges the release tag into `fips` (using opencode to resolve conflicts by dropping TLS/crypto usages from the merged code) and opens a PR, again auto-merging once approved and CI passes -- this time with a true merge commit, not squash.
+- `fips-release-pr-merged.yml` then hands off to `draft-release.yml` again, tagging `fips` and drafting the FIPS release.
+
+These workflows require some one-off repository configuration; see the comments at the top of each workflow file in [`.github/workflows/`](https://github.com/canonical/pebble/tree/master/.github/workflows) (in particular `prepare-release.yml` and `prepare-fips-release.yml`) for the required `OPENROUTER_API_KEY` secret and branch protection settings.
+
+`prepare-release.yml` and `prepare-fips-release.yml` use the default `GITHUB_TOKEN` (rather than a separate bot account/PAT) to keep secret management simple. The trade-off is that GitHub does not run other workflows (like Tests or Lint) off of pull requests/branches/pushes made with the default `GITHUB_TOKEN`, to prevent recursive workflow runs. So the version-bump and fips-merge pull requests these workflows open won't automatically get CI status checks -- only the approving review is enforced automatically. If you want CI to gate these merges too, either configure a bot token/GitHub App for these two workflows instead (see the comments in each file for exactly which steps to change), or have a maintainer manually trigger the checks (e.g. push an empty commit, or close and reopen the PR) before approving.
 
 ### Main release (master branch)
 
-- Update `Version` in `cmd/version.go` to the version you're about to publish, for example `v1.27.0`, open a pull request, have it reviewed and merged into the `master` branch.
-- [Draft a new GitHub release](https://github.com/canonical/pebble/releases/new).
-- Enter the version tag (for example `v1.27.0`) and select "Create new tag: on publish".
-- Enter a release title: include the version tag and a short summary of the release.
-- Write release notes: describe new features and bug fixes, and include a link to the full list of commits.
-- Click "Publish release".
+- Go to [Actions -> Prepare release](https://github.com/canonical/pebble/actions/workflows/prepare-release.yml) and run the workflow with the version you're about to publish, for example `v1.27.0`.
+- Review and approve the resulting version bump pull request (and manually confirm CI has passed, per the note above). It then merges itself and a draft release is created automatically.
+- Open the [draft release](https://github.com/canonical/pebble/releases), review/edit the generated title and notes, and click "Publish release".
 - Monitor the release [GitHub Actions](https://github.com/canonical/pebble/actions) and check that the [snap](https://snapcraft.io/pebble) is uploaded correctly.
 - If you're confident it's a compatible release, [promote the `candidate` snap to `stable`](https://snapcraft.io/pebble/releases).
 - Find the security scan artifact on the corresponding [SBOM and secscan](https://github.com/canonical/pebble/actions/workflows/sbom-secscan.yaml) run, and upload it to the [SSDLC Pebble folder in Drive](https://drive.google.com/drive/folders/11WR629JFPJ8IMPI0kcsNp_qdf39c6no3). Open the artifact and verify that the security scan has not found any vulnerabilities.
 
 ### FIPS release (fips branch)
 
-- Open a pull request to merge the `master` branch into the `fips` branch, resolve any conflicts, and have it reviewed and merged. **Important:** merge using a true merge commit, rather than a squash-and-merge commit.
-- Open a second PR on the `fips` branch to bump the `Version` in `cmd/version.go` to the FIPS version, for example `v1.27.0-fips`, and have it reviewed and merged.
-- Publish a FIPS GitHub release (for example `v1.27.0-fips`) targeting the tip of the `fips` branch.
+- Once `binaries.yml` finishes for the release you just published, `prepare-fips-release.yml` opens a pull request merging the release tag into `fips` (with conflicts pre-resolved by opencode). Review it carefully, especially any TLS/crypto-related conflict resolutions, and approve it (and manually confirm CI has passed, per the note above). **Important:** it merges using a true merge commit, rather than a squash-and-merge commit -- this is automatic, just don't override it.
+- Once that PR merges, a draft FIPS release (for example `v1.27.0-fips`) is created automatically, targeting the tip of the `fips` branch.
+- Open the draft release, review/edit the generated title and notes, and publish it.
 - As with the main release, monitor the release [GitHub Actions](https://github.com/canonical/pebble/actions), check that the FIPS snap is uploaded, and promote it to stable.
