@@ -118,7 +118,7 @@ jobs:
       attestations: write
       contents: read
     if: |
-      github.event_name == 'workflow_call' &&
+      github.event_name != 'pull_request' &&
       !inputs.skip-build
     strategy:
       fail-fast: true
@@ -271,7 +271,7 @@ jobs:
     permissions:
       contents: write
     if: |
-      github.event_name == 'workflow_call' &&
+      github.event_name != 'pull_request' &&
       !inputs.skip-build &&
       needs.test.result == 'success' &&
       always()
@@ -351,7 +351,7 @@ jobs:
     environment: snap-build
     needs: [release]
     if: |
-      github.event_name == 'workflow_call' &&
+      github.event_name != 'pull_request' &&
       !inputs.skip-build &&
       needs.release.result == 'success' &&
       always()
@@ -403,16 +403,20 @@ jobs:
             "${TO_TRACK}/${TO_RISK}"
 
   # Final step: promote from candidate to the latest/stable channel. Only
-  # runs when snap.yml is invoked from release.yml (this workflow no longer
-  # has any trigger that runs the rest of this pipeline other than
-  # workflow_call, but this check documents the intent and protects against
-  # a future trigger being added without considering this stage).
+  # runs when snap.yml is invoked as part of release.yml's pipeline (i.e.
+  # not for the plain pull_request dev-testing trigger). Note that
+  # `github.event_name` here reflects whatever originally triggered the
+  # *top-level* caller workflow (release.yml's workflow_dispatch), not
+  # literally "workflow_call" -- reusable workflows inherit the calling
+  # workflow's event payload, they don't get their own event name. So this
+  # (like the other jobs below) checks `!= 'pull_request'` rather than
+  # `== 'workflow_call'`, which would never be true.
   promote-stable:
     runs-on: ubuntu-latest
     environment: snap-build
     needs: [promote]
     if: |
-      github.event_name == 'workflow_call' &&
+      github.event_name != 'pull_request' &&
       !inputs.skip-release &&
       !inputs.skip-build &&
       needs.promote.result == 'success' &&
