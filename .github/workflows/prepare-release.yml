@@ -8,10 +8,10 @@ name: Prepare release
 #
 # For a FIPS release: merges the tag of an already-published, already
 # non-FIPS release into the `fips` branch (resolving conflicts with the
-# opencode GitHub Action, dropping TLS/crypto usages from the merged code),
-# bumps `Version` to the `-fips` suffixed version, opens a PR for it, and
-# waits for it to be approved and merged with a true merge commit (not
-# squash), to preserve fips branch history.
+# opencode CLI, dropping TLS/crypto usages from the merged code), bumps
+# `Version` to the `-fips` suffixed version, opens a PR for it, and waits for
+# it to be approved and merged with a true merge commit (not squash), to
+# preserve fips branch history.
 #
 # Either way, once the PR merges, this tags the tip of the target branch,
 # builds it as a sanity check, and drafts a GitHub release with title/notes
@@ -24,7 +24,7 @@ name: Prepare release
 #   - "Allow auto-merge" enabled in Settings -> General.
 #   - Branch protection on `master` and `fips` requiring at least one
 #     approving review before merging.
-#   - The `OPENROUTER_API_KEY` secret for the opencode GitHub Action.
+#   - The `OPENROUTER_API_KEY` secret, used to run the opencode CLI.
 #
 # Note: this uses the default GITHUB_TOKEN (via the `permissions:` blocks
 # below), rather than a separate bot/PAT token. That keeps setup simple, but
@@ -142,15 +142,15 @@ jobs:
             echo "conflicts=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install opencode
+        if: inputs.fips && steps.merge.outputs.conflicts == 'true'
+        run: curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.25
+
       - name: Resolve conflicts with opencode
         if: inputs.fips && steps.merge.outputs.conflicts == 'true'
-        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a  # latest (github-v1.2.19)
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
-        with:
-          model: openrouter/google/gemini-3.7-flash
-          prompt: |
+          PROMPT: |
             This repository checkout is in the middle of a git merge with
             conflicts: merging tag ${{ inputs.version }} into the fips
             branch.
@@ -183,6 +183,8 @@ jobs:
 
             Do not commit, push, or open a pull request yourself -- leave the
             resolved changes staged.
+        run: |
+          opencode --auto --model openrouter/google/gemini-3.7-flash --prompt "$PROMPT"
 
       - name: Verify conflicts are resolved
         if: inputs.fips && steps.merge.outputs.conflicts == 'true'
