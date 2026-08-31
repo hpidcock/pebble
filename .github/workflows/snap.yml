@@ -299,7 +299,7 @@ jobs:
     # GitHub release is published.
     env:
       GH_REPO: ${{ github.repository }}
-      RELEASE_RISK: ${{ github.event_name == 'push' && env.EDGE_RISK || env.CANDIDATE_RISK }}
+      RELEASE_RISK: ${{ github.event_name == 'push' && 'edge' || 'candidate' }}
     if: |
       github.event_name != 'pull_request' &&
       github.event_name != 'release' &&
