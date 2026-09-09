@@ -9,3 +9,5 @@ cmd/VERSION
 /pebble
 dist/
 *.test
+.workshop.lock
+
