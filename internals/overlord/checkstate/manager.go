@@ -659,7 +659,7 @@ func (m *CheckManager) RefreshCheck(ctx context.Context, check *plan.Check) (*Ch
 	// If the check is stopped, run the check directly without using changes and tasks.
 	if changeID == "" {
 		chk := newChecker(check)
-		err := runCheck(ctx, chk, check.Timeout.Value)
+		err := runCheck(ctx, check.Name, chk, check.Timeout.Value)
 		if err != nil {
 			return getCheckInfo(), fmt.Errorf("%s", errorDetails(err))
 		}

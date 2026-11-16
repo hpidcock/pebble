@@ -15,6 +15,8 @@
 package standby
 
 import (
+	"context"
+	"runtime/trace"
 	"time"
 
 	"github.com/canonical/pebble/internals/overlord/restart"
@@ -77,10 +79,13 @@ func New(st *state.State) *StandbyOpinions {
 
 func (m *StandbyOpinions) Start() {
 	go func() {
+		ctx, end := trace.NewTask(context.TODO(), "pebble.standby")
+		defer end.End()
 		wait := standbyWait
 		timer := time.NewTimer(wait)
 		for {
 			if m.CanStandby() {
+				trace.Logf(ctx, "standby", "ready=true")
 				m.state.Lock()
 				restart.Request(m.state, restart.RestartSocket)
 				m.state.Unlock()
@@ -100,6 +105,7 @@ func (m *StandbyOpinions) Start() {
 }
 
 func (m *StandbyOpinions) Stop() {
+	defer trace.StartRegion(context.TODO(), "pebble.standby.stop").End()
 	select {
 	case <-m.stoppedCh:
 		// nothing left to do

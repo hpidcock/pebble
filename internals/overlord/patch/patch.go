@@ -20,8 +20,10 @@
 package patch
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"runtime/trace"
 
 	"github.com/canonical/pebble/internals/logger"
 	"github.com/canonical/pebble/internals/overlord/state"
@@ -74,6 +76,7 @@ func applySublevelPatches(level, firstSublevel int, s *state.State) error {
 // Apply applies any necessary patches to update the provided state to
 // conventions required by the current patch level of the system.
 func Apply(s *state.State) error {
+	defer trace.StartRegion(context.TODO(), "pebble.state.patch").End()
 	var stateLevel, stateSublevel int
 	s.Lock()
 	err := s.Get("patch-level", &stateLevel)

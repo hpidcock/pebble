@@ -15,6 +15,8 @@
 package overlord
 
 import (
+	"context"
+	"runtime/trace"
 	"time"
 
 	"github.com/canonical/pebble/internals/osutil"
@@ -25,8 +27,12 @@ type overlordStateBackend struct {
 	ensureBefore func(d time.Duration)
 }
 
-func (osb *overlordStateBackend) Checkpoint(data []byte) error {
-	return osutil.AtomicWriteFile(osb.path, data, 0600, 0)
+func (osb *overlordStateBackend) Checkpoint(data []byte) (err error) {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.state.write").End()
+	err = osutil.AtomicWriteFile(osb.path, data, 0600, 0)
+	trace.Logf(ctx, "write", "bytes=%d error=%v", len(data), err)
+	return err
 }
 
 func (osb *overlordStateBackend) EnsureBefore(d time.Duration) {

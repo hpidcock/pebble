@@ -107,7 +107,7 @@ func v1PostExec(c *Command, req *http.Request, user *UserState) Response {
 		return ServerError("cannot call exec: %v", err)
 	}
 
-	change := st.NewChange("exec", fmt.Sprintf("Execute command %q", args.Command[0]))
+	change := st.NewChangeWithContext(req.Context(), "exec", fmt.Sprintf("Execute command %q", args.Command[0]))
 	taskSet := state.NewTaskSet(task)
 	change.AddAll(taskSet)
 

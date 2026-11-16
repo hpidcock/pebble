@@ -15,6 +15,8 @@
 package state
 
 import (
+	"context"
+	"runtime/trace"
 	"sync"
 	"time"
 
@@ -183,6 +185,13 @@ func (r *TaskRunner) AddBlocked(pred func(t *Task, running []*Task) bool) {
 	r.blocked = append(r.blocked, pred)
 }
 
+func taskTraceContext(t *Task) context.Context {
+	if chg := t.Change(); chg != nil && chg.traceCtx != nil {
+		return chg.traceCtx
+	}
+	return context.TODO()
+}
+
 // run must be called with the state lock in place
 func (r *TaskRunner) run(t *Task) {
 	var handler HandlerFunc
@@ -210,9 +219,15 @@ func (r *TaskRunner) run(t *Task) {
 	}
 
 	t.At(time.Time{}) // clear schedule
+	status := t.Status()
+	traceCtx := taskTraceContext(t)
 	tomb := &tomb.Tomb{}
 	r.tombs[t.ID()] = tomb
 	tomb.Go(func() error {
+		ctx, end := trace.NewTask(traceCtx, "pebble.task")
+		defer end.End()
+		trace.Logf(ctx, "details", "change=%s task=%s kind=%s status=%s", t.change, t.ID(), t.Kind(), status)
+
 		// Capture the error result with tomb.Kill so we can
 		// use tomb.Err uniformly to consider both it or a
 		// overriding previous Kill reason.
@@ -251,6 +266,7 @@ func (r *TaskRunner) run(t *Task) {
 
 		switch x := err.(type) {
 		case *Retry:
+			trace.Logf(ctx, "retry", "after=%s reason=%s", x.After, x.Reason)
 			// Handler asked to be called again later.
 			if t.Status() == AbortStatus {
 				// Would work without it but might take two ensures.
@@ -259,6 +275,7 @@ func (r *TaskRunner) run(t *Task) {
 				t.At(timeNow().Add(x.After))
 			}
 		case *Wait:
+			trace.Logf(ctx, "wait", "reason=%s", x.Reason)
 			if t.Status() == AbortStatus {
 				// Would work without it but might take two ensures.
 				r.tryUndo(t)
@@ -292,6 +309,7 @@ func (r *TaskRunner) run(t *Task) {
 				r.state.EnsureBefore(0)
 			}
 		default:
+			trace.Logf(ctx, "error", "%v", err)
 			r.abortLanes(t.Change(), t.Lanes())
 			t.SetStatus(ErrorStatus)
 			t.Errorf("%s", err)
@@ -301,6 +319,7 @@ func (r *TaskRunner) run(t *Task) {
 				r.taskErrorCallback(err)
 			}
 		}
+		trace.Logf(ctx, "result", "status=%s", t.Status())
 
 		return nil
 	})
@@ -318,9 +337,13 @@ func (r *TaskRunner) clean(t *Task) {
 		return
 	}
 
+	traceCtx := taskTraceContext(t)
 	tomb := &tomb.Tomb{}
 	r.tombs[t.ID()] = tomb
 	tomb.Go(func() error {
+		ctx, end := trace.NewTask(traceCtx, "pebble.task.cleanup")
+		defer end.End()
+		trace.Logf(ctx, "details", "change=%s task=%s kind=%s", t.change, t.ID(), t.Kind())
 		tomb.Kill(cleanup(t, tomb))
 
 		// Locks must be acquired in the same order everywhere.
@@ -332,9 +355,11 @@ func (r *TaskRunner) clean(t *Task) {
 		delete(r.tombs, t.ID())
 
 		if tomb.Err() != nil {
+			trace.Logf(ctx, "error", "%v", tomb.Err())
 			logger.Debugf("Cleaning task %s: %s", t.ID(), tomb.Err())
 		} else {
 			t.SetClean()
+			trace.Logf(ctx, "result", "clean=true")
 		}
 		return nil
 	})
@@ -376,6 +401,8 @@ func (r *TaskRunner) tryUndo(t *Task) {
 // dependencies.
 // Note that Ensure will lock the state.
 func (r *TaskRunner) Ensure() error {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.task.ensure").End()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -389,6 +416,7 @@ func (r *TaskRunner) Ensure() error {
 	defer r.state.Unlock()
 
 	r.someBlocked = false
+	var blockedCount, waiting, scheduled, started, cleanups int
 	running := make([]*Task, 0, len(r.tombs))
 	for tid := range r.tombs {
 		t := r.state.Task(tid)
@@ -425,17 +453,20 @@ ConsiderTasks:
 		status := t.Status()
 		if status.Ready() {
 			if !t.IsClean() {
+				cleanups++
 				r.clean(t)
 			}
 			continue
 		}
 		if status == WaitStatus {
 			// nothing more to run
+			waiting++
 			continue
 		}
 
 		if mustWait(t) {
 			// Dependencies still unhandled.
+			waiting++
 			continue
 		}
 
@@ -453,6 +484,7 @@ ConsiderTasks:
 		// skip tasks scheduled for later and also track the earliest one
 		tWhen := t.AtTime()
 		if !tWhen.IsZero() && ensureTime.Before(tWhen) {
+			scheduled++
 			if nextTaskTime.IsZero() || nextTaskTime.After(tWhen) {
 				nextTaskTime = tWhen
 			}
@@ -463,12 +495,14 @@ ConsiderTasks:
 		// and skip the task if so
 		for _, blocked := range r.blocked {
 			if blocked(t, running) {
+				blockedCount++
 				r.someBlocked = true
 				continue ConsiderTasks
 			}
 		}
 
 		logger.Debugf("Running task %s on %s: %s", t.ID(), t.Status(), t.Summary())
+		started++
 		r.run(t)
 
 		running = append(running, t)
@@ -478,6 +512,7 @@ ConsiderTasks:
 	if !nextTaskTime.IsZero() {
 		r.state.EnsureBefore(nextTaskTime.Sub(ensureTime))
 	}
+	trace.Logf(ctx, "schedule", "started=%d blocked=%d waiting=%d scheduled=%d cleanups=%d", started, blockedCount, waiting, scheduled, cleanups)
 
 	return nil
 }

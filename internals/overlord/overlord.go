@@ -16,11 +16,13 @@
 package overlord
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/trace"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -136,6 +138,7 @@ type Overlord struct {
 
 // New creates an Overlord with all its state managers.
 func New(opts *Options) (*Overlord, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.overlord.new").End()
 
 	o := &Overlord{
 		pebbleDir:   opts.PebbleDir,
@@ -387,6 +390,7 @@ func initRestart(s *state.State, curBootID string, restartHandler restart.Handle
 }
 
 func (o *Overlord) StartUp() error {
+	defer trace.StartRegion(context.TODO(), "pebble.overlord.startup").End()
 	if o.startedUp {
 		return nil
 	}
@@ -499,12 +503,14 @@ func (o *Overlord) loop() error {
 			return nil
 		case <-o.ensureTimer.C:
 		case <-pruneC:
+			region := trace.StartRegion(context.TODO(), "pebble.overlord.prune")
 			st := o.State()
 			st.Lock()
 			st.Prune(o.startOfOperationTime, pruneWait, abortWait, pruneMaxChanges, pruneMaxNotices)
 			st.Unlock()
 			serviceMgr := o.ServiceManager()
 			serviceMgr.Prune(pruneWait, pruneMaxInactiveServices)
+			region.End()
 		}
 	}
 }
@@ -520,6 +526,7 @@ func (o *Overlord) CanStandby() bool {
 
 // Stop stops the ensure loop and the managers under the StateEngine.
 func (o *Overlord) Stop() error {
+	defer trace.StartRegion(context.TODO(), "pebble.overlord.stop").End()
 	o.loopTomb.Kill(nil)
 	err := o.loopTomb.Wait()
 	o.stateEng.Stop()

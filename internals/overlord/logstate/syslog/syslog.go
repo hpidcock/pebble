@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"runtime/trace"
 	"sort"
 	"strconv"
 	"strings"
@@ -160,8 +161,11 @@ func (c *Client) ensureConnected(ctx context.Context) error {
 	}
 
 	d := net.Dialer{Timeout: c.options.DialTimeout}
+	region := trace.StartRegion(ctx, "pebble.log.syslog.dial")
 	conn, err := d.DialContext(ctx, c.location.Scheme, c.location.Host)
+	region.End()
 	if err != nil {
+		trace.Logf(ctx, "error", "%v", err)
 		return fmt.Errorf("cannot connect to %s: %w", c.location, err)
 	}
 
@@ -242,6 +246,8 @@ func (c *Client) Flush(ctx context.Context) error {
 	if len(c.entries) == 0 {
 		return nil
 	}
+	defer trace.StartRegion(ctx, "pebble.log.syslog").End()
+	trace.Logf(ctx, "batch", "entries=%d protocol=%s", len(c.entries), c.location.Scheme)
 
 	if c.location.Scheme == "udp" {
 		return c.flushUDP(ctx)

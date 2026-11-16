@@ -16,10 +16,12 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"runtime/trace"
 	"slices"
 	"sort"
 	"strconv"
@@ -226,6 +228,7 @@ func (s *State) LegacyIdentities() json.RawMessage {
 }
 
 func (s *State) checkpointData() []byte {
+	defer trace.StartRegion(context.TODO(), "pebble.state.marshal").End()
 	data, err := json.Marshal(s)
 	if err != nil {
 		// this shouldn't happen, because the actual delicate serializing happens at various Set()s
@@ -263,19 +266,26 @@ func (s *State) Unlock() {
 		return
 	}
 
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.state.checkpoint").End()
 	data := s.checkpointData()
 	var err error
+	attempts := 0
 	start := time.Now()
 	for time.Since(start) <= unlockCheckpointRetryMaxTime {
+		attempts++
 		if err = s.backend.Checkpoint(data); err == nil {
 			s.modified = false
+			trace.Logf(ctx, "checkpoint", "bytes=%d attempts=%d", len(data), attempts)
 			return
 		}
 
 		logger.Noticef("Cannot write state file, retrying: %v", err)
+		trace.Logf(ctx, "retry", "attempt=%d error=%v", attempts, err)
 
 		time.Sleep(unlockCheckpointRetryInterval)
 	}
+	trace.Logf(ctx, "failure", "bytes=%d attempts=%d error=%v", len(data), attempts, err)
 	logger.Panicf("cannot checkpoint even after %v of retries every %v: %v", unlockCheckpointRetryMaxTime, unlockCheckpointRetryInterval, err)
 }
 
@@ -352,15 +362,25 @@ func (s *State) Cache(key, value any) {
 
 // NewChange adds a new change to the state.
 func (s *State) NewChange(kind, summary string) *Change {
-	return s.NewChangeWithNoticeData(kind, summary, nil)
+	return s.NewChangeWithContext(context.TODO(), kind, summary)
+}
+
+// NewChangeWithContext adds a new change to the state and associates its
+// execution trace with ctx.
+func (s *State) NewChangeWithContext(ctx context.Context, kind, summary string) *Change {
+	return s.newChangeWithNoticeData(ctx, kind, summary, nil)
 }
 
 // NewChangeWithNoticeData adds a new change to the state, adding in any provided notice data.
 func (s *State) NewChangeWithNoticeData(kind, summary string, noticeData map[string]string) *Change {
+	return s.newChangeWithNoticeData(context.TODO(), kind, summary, noticeData)
+}
+
+func (s *State) newChangeWithNoticeData(ctx context.Context, kind, summary string, noticeData map[string]string) *Change {
 	s.writing()
 	s.lastChangeId++
 	id := strconv.Itoa(s.lastChangeId)
-	chg := newChange(s, id, kind, summary)
+	chg := newChange(ctx, s, id, kind, summary)
 	s.changes[id] = chg
 
 	// Set this before calling addNotice as that needs to use it.
@@ -472,6 +492,8 @@ func (s *State) RegisterPendingChangeByAttr(attr string, f func(*Change) bool) {
 //     down to maxNotices, the oldest lastOccurred are removed (in other words,
 //     we keep recent notices in favor of older notices.)
 func (s *State) Prune(startOfOperation time.Time, pruneWait, abortWait time.Duration, maxReadyChanges, maxNotices int) {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.state.prune").End()
 	now := time.Now()
 	pruneLimit := now.Add(-pruneWait)
 	abortLimit := now.Add(-abortWait)
@@ -559,6 +581,7 @@ NextChange:
 		s.pruneMaxNotices(maxNotices, stats)
 	}
 	stats.Log()
+	trace.Logf(ctx, "prune", "changes=%d notices=%d", stats.numChanges, stats.numNotices)
 }
 
 // pruneStats tracks how many changes and notices have been pruned, and what
@@ -711,6 +734,7 @@ func (s *State) SaveTimings(timings any) {
 
 // ReadState returns the state deserialized from r.
 func ReadState(backend Backend, r io.Reader) (*State, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.state.read").End()
 	s := new(State)
 	s.Lock()
 	defer s.unlock()

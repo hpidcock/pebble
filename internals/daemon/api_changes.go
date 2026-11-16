@@ -17,6 +17,7 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"runtime/trace"
 	"slices"
 	"time"
 
@@ -179,6 +180,7 @@ func v1GetChange(c *Command, r *http.Request, _ *UserState) Response {
 }
 
 func v1GetChangeWait(c *Command, r *http.Request, _ *UserState) Response {
+	defer trace.StartRegion(r.Context(), "pebble.change.wait").End()
 	changeID := r.PathValue("id")
 	st := c.d.overlord.State()
 	st.Lock()
@@ -199,16 +201,21 @@ func v1GetChangeWait(c *Command, r *http.Request, _ *UserState) Response {
 		select {
 		case <-change.Ready():
 			timer.Stop() // change ready, release timer resources
+			trace.Logf(r.Context(), "wait", "change=%s ready=true", changeID)
 		case <-timer.C:
+			trace.Logf(r.Context(), "wait", "change=%s timeout=%s", changeID, timeout)
 			return GatewayTimeout("timed out waiting for change after %s", timeout)
 		case <-r.Context().Done():
+			trace.Logf(r.Context(), "wait", "change=%s cancelled=true", changeID)
 			return ServerError("request cancelled")
 		}
 	} else {
 		// No timeout, wait indefinitely for change to be ready.
 		select {
 		case <-change.Ready():
+			trace.Logf(r.Context(), "wait", "change=%s ready=true", changeID)
 		case <-r.Context().Done():
+			trace.Logf(r.Context(), "wait", "change=%s cancelled=true", changeID)
 			return ServerError("request cancelled")
 		}
 	}

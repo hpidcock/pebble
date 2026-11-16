@@ -22,6 +22,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"runtime/trace"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,6 +147,8 @@ func (c *Client) Flush(ctx context.Context) error {
 	if len(c.entries) == 0 {
 		return nil // no-op
 	}
+	defer trace.StartRegion(ctx, "pebble.log.loki").End()
+	trace.Logf(ctx, "batch", "entries=%d", len(c.entries))
 
 	req := c.buildRequest()
 	jsonReq, err := json.Marshal(req)
@@ -162,8 +165,10 @@ func (c *Client) Flush(ctx context.Context) error {
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		trace.Logf(ctx, "error", "%v", err)
 		return err
 	}
+	trace.Logf(ctx, "response", "status=%d bytes=%d", resp.StatusCode, len(jsonReq))
 
 	return c.handleServerResponse(resp)
 }

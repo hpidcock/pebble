@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime/trace"
 	"sync"
 	"syscall"
 	"time"
@@ -130,6 +131,8 @@ var websocketUpgrader = websocket.Upgrader{
 }
 
 func (e *execution) connect(r *http.Request, w http.ResponseWriter, id string) error {
+	defer trace.StartRegion(r.Context(), "pebble.exec.websocket").End()
+	trace.Logf(r.Context(), "websocket", "id=%s", id)
 	e.websocketsLock.Lock()
 	conn, ok := e.websockets[id]
 	e.websocketsLock.Unlock()
@@ -175,22 +178,26 @@ func (e *execution) getWebsocket(key string) *websocket.Conn {
 // waitIOConnected waits till all the I/O websockets are connected or the
 // connect timeout elapses (or the provided ctx is cancelled).
 func (e *execution) waitIOConnected(ctx context.Context, execID string) error {
+	defer trace.StartRegion(ctx, "pebble.exec.wait-io").End()
 	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 	select {
 	case <-ctx.Done():
+		trace.Logf(ctx, "wait-io", "exec=%s error=%v", execID, ctx.Err())
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			logger.Noticef("Exec %s: timeout waiting for websocket connections: %v", execID, ctx.Err())
 			return fmt.Errorf("exec %s: timeout waiting for websocket connections: %w", execID, ctx.Err())
 		}
 		return ctx.Err()
 	case <-e.ioConnected:
+		trace.Logf(ctx, "wait-io", "exec=%s connected=true", execID)
 		return nil
 	}
 }
 
 // do actually runs the command.
 func (e *execution) do(ctx context.Context, task *state.Task) error {
+	defer trace.StartRegion(ctx, "pebble.exec").End()
 	// Wait till client has connected to "stdio" websocket (and "stderr" if
 	// separating stderr), to avoid race conditions forwarding I/O.
 	err := e.waitIOConnected(ctx, task.ID())
@@ -384,16 +391,21 @@ func (e *execution) do(ctx context.Context, task *state.Task) error {
 	}
 
 	// Start the command!
+	processRegion := trace.StartRegion(ctx, "pebble.exec.process")
 	err = reaper.StartCommand(cmd)
 	exitCode := -1
 	if err == nil {
+		trace.Logf(ctx, "process", "exec=%s pid=%d", task.ID(), cmd.Process.Pid)
 		// Send its PID to the control loop.
 		pidCh <- cmd.Process.Pid
 
 		// Wait for it to finish.
 		exitCode, err = reaper.WaitCommand(cmd)
 	}
+	trace.Logf(ctx, "process", "exec=%s exit-code=%d error=%v", task.ID(), exitCode, err)
+	processRegion.End()
 
+	drainRegion := trace.StartRegion(ctx, "pebble.exec.drain")
 	// Close open files and channels.
 	for _, closer := range beforeClosers {
 		_ = closer.Close()
@@ -412,6 +424,7 @@ func (e *execution) do(ctx context.Context, task *state.Task) error {
 	for _, closer := range afterClosers {
 		_ = closer.Close()
 	}
+	drainRegion.End()
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		setExitCode(task, -1)
@@ -514,6 +527,7 @@ func (e *execution) controlLoop(execID string, pidCh <-chan int, stop <-chan str
 				logger.Noticef(`Exec %s: control command "resize" cannot set terminal size to %dx%d: %v`, execID, w, h, err)
 				continue
 			}
+			trace.Logf(context.TODO(), "exec.control", "exec=%s command=resize width=%d height=%d", execID, w, h)
 			logger.Debugf(`Exec %s: PID %d terminal resized to %dx%d`, execID, pid, w, h)
 		case command.Command == "signal":
 			if command.Signal == nil {
@@ -532,6 +546,7 @@ func (e *execution) controlLoop(execID string, pidCh <-chan int, stop <-chan str
 				logger.Noticef(`Exec %s: control command "signal" cannot forward %s to PID %d: %v`, execID, name, pid, err)
 				continue
 			}
+			trace.Logf(context.TODO(), "exec.control", "exec=%s command=signal signal=%s", execID, name)
 			logger.Noticef("Exec %s: forwarded signal %s to PID %d", execID, name, pid)
 		default:
 			logger.Noticef("Exec %s: invalid control websocket command %q", execID, command.Command)

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/trace"
 	"time"
 
 	tombpkg "gopkg.in/tomb.v2"
@@ -52,7 +53,7 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 
 	performCheck := func() (shouldExit bool, err error) {
 		//lint:ignore SA1012 providing a nil context to tomb.Context() is valid
-		err = runCheck(tomb.Context(nil), chk, config.Timeout.Value)
+		err = runCheck(tomb.Context(nil), config.Name, chk, config.Timeout.Value)
 		if !tomb.Alive() {
 			return true, checkStopped(config.Name, task.Kind(), tomb.Err())
 		}
@@ -75,6 +76,7 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 
 			logger.Noticef("Check %q failure %d/%d: %v", config.Name, details.Failures, config.Threshold, err)
 			if atThreshold {
+				trace.Logf(context.TODO(), "check.threshold", "check=%s failures=%d threshold=%d", config.Name, details.Failures, config.Threshold)
 				logger.Noticef("Check %q threshold %d hit, triggering action and recovering", config.Name, config.Threshold)
 				m.callFailureHandlers(config.Name)
 				// Returning the error means perform-check goes to Error status
@@ -134,11 +136,18 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 	}
 }
 
-func runCheck(ctx context.Context, chk checker, timeout time.Duration) error {
+func runCheck(pctx context.Context, name string, chk checker, timeout time.Duration) (err error) {
+	ctx, end := trace.NewTask(pctx, "pebble.check")
+	defer end.End()
+	defer func() {
+		trace.Logf(ctx, "result", "check=%s type=%T error=%v", name, chk, err)
+	}()
+	trace.Logf(ctx, "details", "check=%s type=%T timeout=%s", name, chk, timeout)
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	err := chk.check(ctx)
+	err = chk.check(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("check timed out after %v", timeout)
 	}
@@ -170,7 +179,7 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 
 	recoverCheck := func() (shouldExit bool, err error) {
 		//lint:ignore SA1012 providing a nil context to tomb.Context() is valid
-		err = runCheck(tomb.Context(nil), chk, config.Timeout.Value)
+		err = runCheck(tomb.Context(nil), config.Name, chk, config.Timeout.Value)
 		if !tomb.Alive() {
 			return true, checkStopped(config.Name, task.Kind(), tomb.Err())
 		}
@@ -193,6 +202,7 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 		details.Successes = 1
 		details.Failures = 0
 		details.Proceed = true
+		trace.Logf(context.TODO(), "check.recovery", "check=%s", config.Name)
 		m.state.Lock()
 		task.Set(checkDetailsAttr, &details)
 		m.state.Unlock()

@@ -16,6 +16,7 @@ package plan
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -24,6 +25,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime/trace"
 	"slices"
 	"strconv"
 	"strings"
@@ -701,6 +703,7 @@ func (e *FormatError) Error() string {
 // caller should have validated the individual layers prior to calling, and
 // validate the combined output if required.
 func CombineLayers(layers ...*Layer) (*Layer, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.plan.combine").End()
 	combined := &Layer{
 		Services:   make(map[string]*Service),
 		Checks:     make(map[string]*Check),
@@ -1048,6 +1051,7 @@ func (layer *Layer) Validate() error {
 // Validate checks that the combined layers form a valid plan. See also
 // Layer.Validate, which checks that the individual layers are valid.
 func (p *Plan) Validate() error {
+	defer trace.StartRegion(context.TODO(), "pebble.plan.validate").End()
 	for name, service := range p.Services {
 		if service.Command == "" {
 			return &FormatError{
@@ -1322,6 +1326,7 @@ func (p *Plan) checkCycles() error {
 }
 
 func ParseLayer(order int, label string, data []byte) (*Layer, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.plan.parse").End()
 	layer := &Layer{
 		Services:   make(map[string]*Service),
 		Checks:     make(map[string]*Check),
@@ -1610,6 +1615,7 @@ func configLayerEntries(configDir string, dirOK bool) (configs []*configEntry, e
 // If base is not nil, layers read from the given layersDir
 // will be stacked on top of the given base plan.
 func ReadDir(layersDir string, base *Plan) (*Plan, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.plan.read").End()
 	var layers []*Layer
 
 	_, err := os.Stat(layersDir)

@@ -16,10 +16,12 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"runtime/trace"
 	"sort"
 	"strings"
 	"time"
@@ -148,6 +150,9 @@ type Change struct {
 
 	spawnTime time.Time
 	readyTime time.Time
+
+	traceCtx context.Context
+	traceEnd *trace.Task
 }
 
 type byReadyTime []*Change
@@ -156,14 +161,18 @@ func (a byReadyTime) Len() int           { return len(a) }
 func (a byReadyTime) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a byReadyTime) Less(i, j int) bool { return a[i].readyTime.Before(a[j].readyTime) }
 
-func newChange(state *State, id, kind, summary string) *Change {
+func newChange(pctx context.Context, state *State, id, kind, summary string) *Change {
+	ctx, end := trace.NewTask(pctx, "pebble.change")
+	trace.Logf(ctx, "details", "id=%s kind=%s summary=%s", id, kind, summary)
 	return &Change{
-		state:   state,
-		id:      id,
-		kind:    kind,
-		summary: summary,
-		data:    make(customData),
-		ready:   make(chan struct{}),
+		state:    state,
+		id:       id,
+		kind:     kind,
+		summary:  summary,
+		data:     make(customData),
+		ready:    make(chan struct{}),
+		traceCtx: ctx,
+		traceEnd: end,
 
 		spawnTime: timeNow(),
 	}
@@ -448,6 +457,9 @@ func shouldSkipChangeUpdateNotice(old, new Status) bool {
 
 func (c *Change) notifyStatusChange(new Status) {
 	if c.lastObservedStatus != new {
+		if c.traceCtx != nil {
+			trace.Logf(c.traceCtx, "status", "old=%s new=%s", c.lastObservedStatus, new)
+		}
 		c.state.notifyChangeStatusChangedHandlers(c, c.lastObservedStatus, new)
 		c.lastObservedStatus = new
 	}
@@ -475,6 +487,11 @@ func (c *Change) markReady() {
 	case <-c.ready:
 	default:
 		close(c.ready)
+	}
+	if c.traceEnd != nil {
+		trace.Logf(c.traceCtx, "ready", "status=%s", c.Status())
+		c.traceEnd.End()
+		c.traceEnd = nil
 	}
 	if c.readyTime.IsZero() {
 		c.readyTime = timeNow()

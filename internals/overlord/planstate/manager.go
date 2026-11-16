@@ -15,7 +15,9 @@
 package planstate
 
 import (
+	"context"
 	"fmt"
+	"runtime/trace"
 	"slices"
 	"strings"
 	"sync"
@@ -56,6 +58,7 @@ func NewManager(layersDir string) (*PlanManager, error) {
 // the case of a non-existent layers directory, or no layers in the layers
 // directory, the base plan (or an empty plan) is announced to change subscribers.
 func (m *PlanManager) Load(base *plan.Plan) (err error) {
+	defer trace.StartRegion(context.TODO(), "pebble.plan.load").End()
 	m.planLock.Lock()
 
 	var p *plan.Plan
@@ -97,6 +100,7 @@ func (m *PlanManager) callChangeListeners(plan *plan.Plan) {
 		// shouldn't call listeners when the operation fails).
 		return
 	}
+	defer trace.StartRegion(context.TODO(), "pebble.plan.listeners").End()
 	for _, f := range m.changeListeners {
 		f(plan)
 	}
@@ -119,6 +123,9 @@ func (m *PlanManager) Plan() *plan.Plan {
 // configuration being located in a sub-directory. On any error the plan is
 // left exactly as it was, including its layer list.
 func (m *PlanManager) AppendLayer(layer *plan.Layer, inner bool) error {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.plan.append").End()
+	trace.Logf(ctx, "layer", "label=%s", layer.Label)
 	var newPlan *plan.Plan
 	defer func() { m.callChangeListeners(newPlan) }()
 
@@ -141,6 +148,9 @@ func (m *PlanManager) AppendLayer(layer *plan.Layer, inner bool) error {
 // layer not yet existing), and if the configuration layer is located in a
 // sub-directory (see AppendLayer).
 func (m *PlanManager) CombineLayer(layer *plan.Layer, inner bool) error {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.plan.combine-layer").End()
+	trace.Logf(ctx, "layer", "label=%s", layer.Label)
 	var newPlan *plan.Plan
 	defer func() { m.callChangeListeners(newPlan) }()
 

@@ -1,6 +1,7 @@
 package servstate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime/trace"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -108,6 +110,7 @@ type serviceData struct {
 	backoffTime  time.Duration
 	resetTimer   *time.Timer
 	restarting   bool
+	traceCtx     context.Context
 	currentSince time.Time
 	startCount   atomic.Int64
 }
@@ -321,6 +324,12 @@ func (s *serviceData) transition(state serviceState) {
 	s.transitionRestarting(state, false)
 }
 
+func (s *serviceData) tracef(category, format string, args ...any) {
+	if s.traceCtx != nil {
+		trace.Logf(s.traceCtx, category, format, args...)
+	}
+}
+
 // transitionRestarting changes the service's state and also sets the restarting flag.
 func (s *serviceData) transitionRestarting(state serviceState, restarting bool) {
 	// Update current-since time if derived status is changing.
@@ -330,8 +339,10 @@ func (s *serviceData) transitionRestarting(state serviceState, restarting bool) 
 		s.currentSince = time.Now()
 	}
 
+	oldState := s.state
 	s.state = state
 	s.restarting = restarting
+	s.tracef("state", "old=%s new=%s restarting=%t", oldState, state, restarting)
 }
 
 // start is called to transition from the initial state and start the service.
@@ -472,13 +483,19 @@ func (s *serviceData) startInternal() error {
 
 	// Start the process!
 	logger.Noticef("Service %q starting: %s", serviceName, s.config.Command)
+	traceCtx, traceEnd := trace.NewTask(context.TODO(), "pebble.service")
+	trace.Logf(traceCtx, "details", "service=%s", serviceName)
 	err = reaper.StartCommand(s.cmd)
 	if err != nil {
+		trace.Logf(traceCtx, "error", "service=%s error=%v", serviceName, err)
+		traceEnd.End()
 		if outputIterator != nil {
 			_ = outputIterator.Close()
 		}
 		return fmt.Errorf("cannot start service: %w", err)
 	}
+	s.traceCtx = traceCtx
+	trace.Logf(traceCtx, "start", "service=%s pid=%d", serviceName, s.cmd.Process.Pid)
 	logger.Debugf("Service %q started with PID %d", serviceName, s.cmd.Process.Pid)
 	s.resetTimer = time.AfterFunc(s.config.BackoffLimit.Value, func() { logError(s.backoffResetElapsed()) })
 
@@ -486,7 +503,9 @@ func (s *serviceData) startInternal() error {
 	done := make(chan struct{})
 	cmd := s.cmd
 	go func() {
+		defer traceEnd.End()
 		exitCode, waitErr := reaper.WaitCommand(cmd)
+		trace.Logf(traceCtx, "exit", "service=%s pid=%d exit-code=%d error=%v", serviceName, cmd.Process.Pid, exitCode, waitErr)
 		if waitErr != nil {
 			logger.Noticef("Cannot wait for service %q: %v", serviceName, waitErr)
 		} else {
@@ -636,6 +655,7 @@ func (s *serviceData) doBackoff(action plan.ServiceAction, onType string) {
 		s.config.Name, onType, action, s.backoffTime, s.backoffNum)
 	s.transition(stateBackoff)
 	duration := s.backoffTime + s.manager.getJitter(s.backoffTime)
+	s.tracef("backoff", "action=%s trigger=%s duration=%s attempt=%d", action, onType, duration, s.backoffNum)
 	time.AfterFunc(duration, func() { logError(s.backoffTimeElapsed()) })
 }
 
@@ -691,6 +711,7 @@ func (s *serviceData) sendSignal(signal string) error {
 		}
 		logger.Noticef("Sending %s to service %q", signal, s.config.Name)
 		err := syscall.Kill(s.cmd.Process.Pid, sig)
+		s.tracef("signal", "signal=%s error=%v", signal, err)
 		if err != nil {
 			return err
 		}
@@ -729,6 +750,7 @@ func (s *serviceData) stop() error {
 		logger.Debugf("Attempting to stop service %q by sending SIGTERM", s.config.Name)
 		// First send SIGTERM to try to terminate it gracefully.
 		err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGTERM)
+		s.tracef("signal", "signal=SIGTERM error=%v", err)
 		if err != nil {
 			logger.Noticef("Cannot send SIGTERM to process: %v", err)
 		}
@@ -778,6 +800,7 @@ func (s *serviceData) terminateTimeElapsed() error {
 		logger.Debugf("Attempting to stop service %q again by sending SIGKILL", s.config.Name)
 		// Process hasn't exited after SIGTERM, try SIGKILL.
 		err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		s.tracef("signal", "signal=SIGKILL error=%v", err)
 		if err != nil {
 			logger.Noticef("Cannot send SIGKILL to process: %v", err)
 		}
@@ -839,6 +862,7 @@ func (s *serviceData) backoffResetElapsed() error {
 
 // checkFailed handles a health check failure (from the check manager).
 func (s *serviceData) checkFailed(action plan.ServiceAction) {
+	s.tracef("check-failure", "action=%s state=%s", action, s.state)
 	switch s.state {
 	case stateRunning, stateBackoff, stateExited:
 		onType := "on-check-failure"

@@ -15,7 +15,9 @@
 package overlord
 
 import (
+	"context"
 	"fmt"
+	"runtime/trace"
 	"sync"
 
 	"github.com/canonical/pebble/internals/logger"
@@ -90,6 +92,8 @@ func (e *startupError) Error() string {
 
 // StartUp asks all managers to perform any expensive initialization. It is a noop after the first invocation.
 func (se *StateEngine) StartUp() error {
+	ctx, end := trace.NewTask(context.TODO(), "pebble.state.startup")
+	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
 	if se.startedUp {
@@ -99,8 +103,11 @@ func (se *StateEngine) StartUp() error {
 	var errs []error
 	for _, m := range se.managers {
 		if starterUp, ok := m.(StateStarterUp); ok {
+			region := trace.StartRegion(ctx, fmt.Sprintf("pebble.manager.startup %T", m))
 			err := starterUp.StartUp()
+			region.End()
 			if err != nil {
+				trace.Logf(ctx, "error", "manager=%T error=%v", m, err)
 				errs = append(errs, err)
 			}
 		}
@@ -128,6 +135,8 @@ func (e *ensureError) Error() string {
 // must not perform long running activities during that operation, though.
 // These should be performed in properly tracked changes and tasks.
 func (se *StateEngine) Ensure() error {
+	ctx, end := trace.NewTask(context.TODO(), "pebble.ensure")
+	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
 	if !se.startedUp {
@@ -138,8 +147,11 @@ func (se *StateEngine) Ensure() error {
 	}
 	var errs []error
 	for _, m := range se.managers {
+		region := trace.StartRegion(ctx, fmt.Sprintf("pebble.ensure %T", m))
 		err := m.Ensure()
+		region.End()
 		if err != nil {
+			trace.Logf(ctx, "error", "manager=%T error=%v", m, err)
 			logger.Noticef("State ensure error: %v", err)
 			errs = append(errs, err)
 		}
@@ -159,6 +171,8 @@ func (se *StateEngine) AddManager(m StateManager) {
 
 // Wait waits for all managers current activities.
 func (se *StateEngine) Wait() {
+	ctx, end := trace.NewTask(context.TODO(), "pebble.state.wait")
+	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
 	if se.stopped {
@@ -166,13 +180,17 @@ func (se *StateEngine) Wait() {
 	}
 	for _, m := range se.managers {
 		if waiter, ok := m.(StateWaiter); ok {
+			region := trace.StartRegion(ctx, fmt.Sprintf("pebble.manager.wait %T", m))
 			waiter.Wait()
+			region.End()
 		}
 	}
 }
 
 // Stop asks all managers to terminate activities running concurrently.
 func (se *StateEngine) Stop() {
+	ctx, end := trace.NewTask(context.TODO(), "pebble.state.stop")
+	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
 	if se.stopped {
@@ -185,7 +203,9 @@ func (se *StateEngine) Stop() {
 		m := se.managers[i]
 		if stopper, ok := m.(StateStopper); ok {
 			logger.Debugf("State engine is stopping %T", m)
+			region := trace.StartRegion(ctx, fmt.Sprintf("pebble.manager.stop %T", m))
 			stopper.Stop()
+			region.End()
 		}
 	}
 	se.stopped = true

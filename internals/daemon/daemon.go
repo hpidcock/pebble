@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,6 +280,8 @@ func (c *Command) Daemon() *Daemon {
 }
 
 func (c *Command) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer trace.StartRegion(r.Context(), "pebble.api "+c.Path).End()
+
 	// check if we are in degradedMode
 	if c.d.degradedErr != nil && r.Method != "GET" {
 		ServerError(c.d.degradedErr.Error()).ServeHTTP(w, r)
@@ -415,10 +418,16 @@ func (w *wrappedWriter) status() int {
 
 func logit(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, end := trace.NewTask(r.Context(), "pebble.http")
+		defer end.End()
+		r = r.WithContext(ctx)
+		trace.Logf(ctx, "request", "%s %s", r.Method, r.URL.Path)
+
 		ww := &wrappedWriter{w: w}
 		t0 := time.Now()
 		handler.ServeHTTP(ww, r)
 		t := time.Since(t0)
+		trace.Logf(ctx, "response", "status=%d duration=%s", ww.status(), t)
 
 		transport := RequestTransportType(r)
 
@@ -464,6 +473,7 @@ func exitOnPanic(handler http.Handler, stderr io.Writer, exit func()) http.Handl
 // Init sets up the Daemon's internal workings.
 // Don't call more than once.
 func (d *Daemon) Init() error {
+	defer trace.StartRegion(context.TODO(), "pebble.daemon.init").End()
 	logger.SecurityWarn(logger.SecuritySysStartup, strconv.Itoa(os.Getuid()), "Starting daemon")
 
 	listenerMap := make(map[string]net.Listener)
@@ -565,6 +575,7 @@ func (d *Daemon) initStandbyHandling() {
 }
 
 func (d *Daemon) Start() error {
+	defer trace.StartRegion(context.TODO(), "pebble.daemon.start").End()
 	if d.rebootIsMissing {
 		// we need to schedule and wait for a system restart
 		d.tomb.Kill(nil)
@@ -652,6 +663,7 @@ func (d *Daemon) Start() error {
 
 // HandleRestart implements overlord.RestartBehavior.
 func (d *Daemon) HandleRestart(t restart.RestartType) {
+	trace.Logf(context.TODO(), "restart", "type=%v", t)
 	if !d.tomb.Alive() {
 		// Already shutting down, do nothing.
 		return
@@ -690,6 +702,8 @@ var shutdownTimeout = time.Second
 
 // Stop shuts down the Daemon.
 func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
+	ctx, end := trace.NewTask(context.TODO(), "pebble.daemon.shutdown")
+	defer end.End()
 	logger.SecurityWarn(logger.SecuritySysShutdown, strconv.Itoa(os.Getuid()), "Shutting down daemon")
 
 	if d.rebootIsMissing {
@@ -703,7 +717,9 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	// Stop all running services. Must do this before overlord.Stop, as it
 	// creates a change and waits for the change, and overlord.Stop calls
 	// StateEngine.Stop, which locks, so Ensure would result in a deadlock.
-	err := d.stopRunningServices()
+	stopServicesRegion := trace.StartRegion(ctx, "pebble.daemon.stop-services")
+	err := d.stopRunningServices(ctx)
+	stopServicesRegion.End()
 	if err != nil {
 		// This isn't fatal for exiting the daemon, so log and continue.
 		logger.Noticef("Cannot stop running services: %v", err)
@@ -714,6 +730,7 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	d.mu.Lock()
 	requestedRestart := d.requestedRestart
 	d.mu.Unlock()
+	trace.Logf(ctx, "shutdown", "restart=%v", requestedRestart)
 
 	d.standbyOpinions.Stop()
 
@@ -728,7 +745,8 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	// Shutdown closes the listeners before waiting for active requests, and
 	// its shutdown callback above tells us when new requests can no longer
 	// be accepted.
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	httpShutdownRegion := trace.StartRegion(ctx, "pebble.daemon.http-shutdown")
+	ctx, cancel := context.WithTimeout(ctx, shutdownTimeout)
 	shutdownErr := make(chan error, 1)
 	go func() {
 		shutdownErr <- d.serve.Shutdown(ctx)
@@ -743,6 +761,8 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 
 	shutdownErrValue := <-shutdownErr
 	cancel()
+	httpShutdownRegion.End()
+	trace.Logf(ctx, "shutdown", "http-error=%v", shutdownErrValue)
 	d.tomb.Kill(shutdownErrValue)
 
 	if requestedRestart != restart.RestartSystem {
@@ -796,7 +816,8 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 
 // stopRunningServices stops all running services, waiting for a short time
 // for them all to stop.
-func (d *Daemon) stopRunningServices() error {
+func (d *Daemon) stopRunningServices(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.daemon.stop-running-services").End()
 	taskSet, err := servstate.StopRunning(d.state, d.overlord.ServiceManager())
 	if err != nil {
 		return err
@@ -810,7 +831,7 @@ func (d *Daemon) stopRunningServices() error {
 	logger.Noticef("Stopping all running services.")
 	st := d.state
 	st.Lock()
-	chg := st.NewChange("stop", "Stop all running services")
+	chg := st.NewChangeWithContext(ctx, "stop", "Stop all running services")
 	chg.AddAll(taskSet)
 	st.EnsureBefore(0) // start operation right away
 	st.Unlock()
@@ -818,8 +839,10 @@ func (d *Daemon) stopRunningServices() error {
 	// Wait for a limited amount of time for them to stop.
 	select {
 	case <-chg.Ready():
+		trace.Logf(ctx, "shutdown", "change=%s ready=true", chg.ID())
 		logger.Debugf("All services stopped.")
 	case <-time.After(d.overlord.ServiceManager().StopTimeout()):
+		trace.Logf(ctx, "shutdown", "change=%s timeout=true", chg.ID())
 		return errors.New("timeout stopping running services")
 	}
 	return nil
@@ -853,6 +876,8 @@ func (d *Daemon) rebootDelay() (time.Duration, error) {
 }
 
 func (d *Daemon) doReboot(sigCh chan<- os.Signal, waitTimeout time.Duration) error {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.daemon.reboot").End()
 	if rebootMode == ExternalMode {
 		return ErrRestartExternal
 	}
@@ -861,6 +886,7 @@ func (d *Daemon) doReboot(sigCh chan<- os.Signal, waitTimeout time.Duration) err
 	if err != nil {
 		return err
 	}
+	trace.Logf(ctx, "reboot", "delay=%s wait-timeout=%s", rebootDelay, waitTimeout)
 	// ask for shutdown and wait for it to happen.
 	// if we exit, pebble will be restarted by systemd
 	if err := rebootHandler(rebootDelay); err != nil {
@@ -1022,6 +1048,7 @@ func (d *Daemon) pairingWindowEnabled() bool {
 }
 
 func New(opts *Options) (*Daemon, error) {
+	defer trace.StartRegion(context.TODO(), "pebble.daemon.new").End()
 	d := &Daemon{
 		options: opts,
 	}

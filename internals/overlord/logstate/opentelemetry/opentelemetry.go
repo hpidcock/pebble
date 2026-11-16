@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/trace"
 	"sort"
 	"strconv"
 	"strings"
@@ -239,6 +240,8 @@ func (c *Client) Flush(ctx context.Context) error {
 	if len(c.entries) == 0 {
 		return nil // no-op
 	}
+	defer trace.StartRegion(ctx, "pebble.log.opentelemetry").End()
+	trace.Logf(ctx, "batch", "entries=%d", len(c.entries))
 
 	// Group entries by service.
 	serviceBatches := make(map[string][]logRecord)
@@ -296,8 +299,10 @@ func (c *Client) sendBatch(ctx context.Context, payload payload) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		trace.Logf(ctx, "error", "%v", err)
 		return fmt.Errorf("cannot send logs: %v", err)
 	}
+	trace.Logf(ctx, "response", "status=%d bytes=%d", resp.StatusCode, len(jsonData))
 
 	return c.handleServerResponse(resp)
 }

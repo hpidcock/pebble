@@ -22,6 +22,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"runtime/trace"
 	"slices"
 	"strconv"
 	"strings"
@@ -130,6 +131,11 @@ func streamLogs(
 	itsByName map[string]servicelog.Iterator,
 	numLogs int, follow bool,
 ) error {
+	defer trace.StartRegion(ctx, "pebble.log.stream").End()
+	emitted := 0
+	defer func() {
+		trace.Logf(ctx, "stream", "entries=%d follow=%t", emitted, follow)
+	}()
 	defer func() {
 		for _, it := range itsByName {
 			_ = it.Close()
@@ -155,7 +161,9 @@ func streamLogs(
 		parsers[i] = servicelog.NewParser(iterators[i], logReaderSize)
 	}
 
+	backscroll := trace.StartRegion(ctx, "pebble.log.backscroll")
 	stepBack(iterators, numLogs)
+	backscroll.End()
 
 	// Slice of next entries for each service
 	nexts := make([]servicelog.Entry, len(services))
@@ -163,6 +171,7 @@ func streamLogs(
 	// Main loop: output earliest log per iteration. Stop when ctx is done or
 	// there are no more logs (in non-follow mode).
 	requestStarted := time.Now().UTC()
+	following := false
 	for {
 		// Try to fetch next log from each service (parser/iterator combo).
 		for i, parser := range parsers {
@@ -198,6 +207,10 @@ func streamLogs(
 			if !follow {
 				return nil
 			}
+			if !following {
+				trace.Logf(ctx, "stream", "following=true")
+				following = true
+			}
 			select {
 			case <-notification:
 			case <-ctx.Done():
@@ -216,6 +229,7 @@ func streamLogs(
 		if err != nil {
 			return fmt.Errorf("cannot write logs: %w", err)
 		}
+		emitted++
 		if follow {
 			flushWriter(w)
 		}

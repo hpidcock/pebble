@@ -15,6 +15,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"os"
 	"os/user"
 	pathpkg "path"
+	"runtime/trace"
 	"strconv"
 	"syscall"
 	"time"
@@ -61,7 +63,7 @@ func v1GetFiles(_ *Command, req *http.Request, user *UserState) Response {
 		if itself != "true" && itself != "false" && itself != "" {
 			return BadRequest(`itself parameter must be "true" or "false"`)
 		}
-		return listFilesResponse(path, pattern, itself == "true")
+		return listFilesResponse(req.Context(), path, pattern, itself == "true")
 	default:
 		return BadRequest("invalid action %q", action)
 	}
@@ -81,6 +83,7 @@ type readFilesResponse struct {
 }
 
 func (r readFilesResponse) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	defer trace.StartRegion(req.Context(), "pebble.files.read").End()
 	// Write HTTP status and headers. HTTP status is always OK because we don't
 	// know any better until we've read all the files.
 	mw := multipart.NewWriter(w)
@@ -92,7 +95,10 @@ func (r readFilesResponse) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	result := make([]fileResult, len(r.paths))
 	for i, path := range r.paths {
 		logger.SecurityWarn(logger.SecurityAuthzAdmin, userString(r.user)+",pull_file", "Pulling file "+path)
-		err := readFile(path, mw)
+		region := trace.StartRegion(req.Context(), "pebble.files.read.file")
+		written, err := readFile(path, mw)
+		region.End()
+		trace.Logf(req.Context(), "file", "path=%s bytes=%d error=%v", path, written, err)
 		result[i] = fileResult{
 			Path:  path,
 			Error: fileErrorToResult(err),
@@ -135,32 +141,28 @@ func nonAbsolutePathError(path string) error {
 	return fmt.Errorf("paths must be absolute, got %q", path)
 }
 
-func readFile(path string, mw *multipart.Writer) error {
+func readFile(path string, mw *multipart.Writer) (int64, error) {
 	if !pathpkg.IsAbs(path) {
-		return nonAbsolutePathError(path)
+		return 0, nonAbsolutePathError(path)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("can only read a regular file: %q", path)
+		return 0, fmt.Errorf("can only read a regular file: %q", path)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
 
 	fw, err := mw.CreateFormFile("files", path)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = io.Copy(fw, f)
-	if err != nil {
-		return err
-	}
-	return nil
+	return io.Copy(fw, f)
 }
 
 func fileErrorToResult(err error) *errorResult {
@@ -284,11 +286,13 @@ func fileInfoToResult(fullPath string, info os.FileInfo, userCache, groupCache m
 	return result
 }
 
-func listFilesResponse(path, pattern string, itself bool) Response {
+func listFilesResponse(ctx context.Context, path, pattern string, itself bool) Response {
+	defer trace.StartRegion(ctx, "pebble.files.list").End()
 	if !pathpkg.IsAbs(path) {
 		return BadRequest("path must be absolute, got %q", path)
 	}
 	result, err := listFiles(path, pattern, itself)
+	trace.Logf(ctx, "list", "path=%s entries=%d error=%v", path, len(result), err)
 	if err != nil {
 		return &resp{
 			Type:   ResponseTypeError,
@@ -357,7 +361,7 @@ func v1PostFiles(_ *Command, req *http.Request, user *UserState) Response {
 		if len(boundary) < minBoundaryLength {
 			return BadRequest("invalid boundary %q", boundary)
 		}
-		return writeFiles(req.Body, boundary, user)
+		return writeFiles(req.Context(), req.Body, boundary, user)
 	case "application/json":
 		var payload struct {
 			Action string            `json:"action"`
@@ -370,9 +374,9 @@ func v1PostFiles(_ *Command, req *http.Request, user *UserState) Response {
 		}
 		switch payload.Action {
 		case "make-dirs":
-			return makeDirs(payload.Dirs)
+			return makeDirs(req.Context(), payload.Dirs)
 		case "remove":
-			return removePaths(payload.Paths)
+			return removePaths(req.Context(), payload.Paths)
 		case "write":
 			return BadRequest(`must use multipart with "write" action`)
 		default:
@@ -395,7 +399,8 @@ type writeFilesItem struct {
 	Group       string `json:"group"`
 }
 
-func writeFiles(body io.Reader, boundary string, user *UserState) Response {
+func writeFiles(ctx context.Context, body io.Reader, boundary string, user *UserState) Response {
+	defer trace.StartRegion(ctx, "pebble.files.write").End()
 	// Read metadata part (field name "request").
 	mr := multipart.NewReader(body, boundary)
 	part, err := mr.NextPart()
@@ -444,7 +449,10 @@ func writeFiles(body io.Reader, boundary string, user *UserState) Response {
 			return BadRequest("no metadata for path %q", path)
 		}
 		logger.SecurityWarn(logger.SecurityAuthzAdmin, userString(user)+",push_file", "Pushing file "+path)
+		region := trace.StartRegion(ctx, "pebble.files.write.file")
 		errors[path] = writeFile(info, part)
+		region.End()
+		trace.Logf(ctx, "file", "path=%s error=%v", path, errors[path])
 		part.Close()
 	}
 
@@ -560,10 +568,12 @@ type makeDirsItem struct {
 	Group       string `json:"group"`
 }
 
-func makeDirs(dirs []makeDirsItem) Response {
+func makeDirs(ctx context.Context, dirs []makeDirsItem) Response {
+	defer trace.StartRegion(ctx, "pebble.files.mkdirs").End()
 	result := make([]fileResult, len(dirs))
 	for i, dir := range dirs {
 		err := makeDir(dir)
+		trace.Logf(ctx, "mkdir", "path=%s error=%v", dir.Path, err)
 		result[i] = fileResult{
 			Path:  dir.Path,
 			Error: fileErrorToResult(err),
@@ -609,10 +619,12 @@ type removePathsItem struct {
 	Recursive bool   `json:"recursive"`
 }
 
-func removePaths(paths []removePathsItem) Response {
+func removePaths(ctx context.Context, paths []removePathsItem) Response {
+	defer trace.StartRegion(ctx, "pebble.files.remove").End()
 	result := make([]fileResult, len(paths))
 	for i, path := range paths {
 		err := removePath(path.Path, path.Recursive)
+		trace.Logf(ctx, "remove", "path=%s recursive=%t error=%v", path.Path, path.Recursive, err)
 		result[i] = fileResult{
 			Path:  path.Path,
 			Error: fileErrorToResult(err),

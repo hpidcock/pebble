@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/trace"
 	"time"
 
 	"gopkg.in/tomb.v2"
@@ -218,10 +219,16 @@ func (g *logGatherer) loop() error {
 	// Keep track of number of logs written since last flush
 	numWritten := 0
 
-	flushClient := func(ctx context.Context) {
+	flushClient := func(ctx context.Context, reason string) {
+		entries := numWritten
+		ctx, end := trace.NewTask(ctx, "pebble.log.flush")
+		defer end.End()
+		trace.Logf(ctx, "batch", "target=%s entries=%d reason=%s", g.targetName, entries, reason)
+
 		// Mark timer as unset
 		flushTimer.Stop()
 		err := g.client.Flush(ctx)
+		trace.Logf(ctx, "result", "target=%s entries=%d error=%v", g.targetName, entries, err)
 		if err != nil {
 			logger.Noticef("Cannot flush logs to target %q: %v", g.targetName, err)
 		}
@@ -235,12 +242,12 @@ mainLoop:
 			break mainLoop
 
 		case <-flushTimer.Expired():
-			flushClient(g.clientCtx)
+			flushClient(g.clientCtx, "timer")
 
 		case args := <-g.setLabels:
 			// Before we change the labels, flush any logs currently in the buffer,
 			// so that these logs are sent with the correct (old) labels.
-			flushClient(g.clientCtx)
+			flushClient(g.clientCtx, "labels")
 			g.client.SetLabels(args.service, args.labels)
 
 		case entry := <-g.entryCh:
@@ -252,7 +259,7 @@ mainLoop:
 			numWritten++
 			// Check if buffer is full
 			if numWritten >= g.maxBufferedEntries {
-				flushClient(g.clientCtx)
+				flushClient(g.clientCtx, "buffer-full")
 				continue
 			}
 			// Otherwise, set the timeout
@@ -264,7 +271,7 @@ mainLoop:
 	// We need to create a new context, as the previous one may have been cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), g.timeoutFinalFlush)
 	defer cancel()
-	flushClient(ctx)
+	flushClient(ctx, "final")
 	return nil
 }
 

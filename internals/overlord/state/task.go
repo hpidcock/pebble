@@ -17,6 +17,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"runtime/trace"
 	"slices"
 	"time"
 
@@ -248,6 +249,9 @@ func (t *Task) changeStatus(old, new Status) {
 	}
 	chg := t.Change()
 	if chg != nil {
+		if chg.traceCtx != nil {
+			trace.Logf(chg.traceCtx, "task", "id=%s kind=%s old=%s new=%s", t.ID(), t.Kind(), old, new)
+		}
 		chg.taskStatusChanged(t, old, new)
 	}
 	t.state.notifyTaskStatusChangedHandlers(t, old, new)

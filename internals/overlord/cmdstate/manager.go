@@ -16,6 +16,7 @@ package cmdstate
 
 import (
 	"net/http"
+	"runtime/trace"
 	"sync"
 
 	"gopkg.in/tomb.v2"
@@ -59,6 +60,8 @@ func (m *CommandManager) Ensure() error {
 
 // Connect upgrades the HTTP connection and connects to the given websocket.
 func (m *CommandManager) Connect(r *http.Request, w http.ResponseWriter, task *state.Task, websocketID string) error {
+	defer trace.StartRegion(r.Context(), "pebble.exec.connect").End()
+	trace.Logf(r.Context(), "connect", "exec=%s websocket=%s", task.ID(), websocketID)
 	stopWait := make(chan struct{})
 	defer func() {
 		// So waitExecution wakes up if it's stuck in Wait().

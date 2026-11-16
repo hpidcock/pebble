@@ -31,6 +31,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"runtime/trace"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -67,6 +69,40 @@ type RequestOptions struct {
 	Query   url.Values
 	Headers map[string]string
 	Body    io.Reader
+}
+
+type tracedResponseBody struct {
+	body  io.ReadCloser
+	ctx   context.Context
+	task  *trace.Task
+	once  sync.Once
+	bytes int64
+}
+
+func (b *tracedResponseBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	b.bytes += int64(n)
+	if err != nil {
+		b.finish(err)
+	}
+	return n, err
+}
+
+func (b *tracedResponseBody) Close() error {
+	err := b.body.Close()
+	b.finish(err)
+	return err
+}
+
+func (b *tracedResponseBody) finish(err error) {
+	b.once.Do(func() {
+		if err != nil && !errors.Is(err, io.EOF) {
+			trace.Logf(b.ctx, "body", "bytes=%d error=%v", b.bytes, err)
+		} else {
+			trace.Logf(b.ctx, "body", "bytes=%d", b.bytes)
+		}
+		b.task.End()
+	})
 }
 
 type RequestResponse struct {
@@ -310,6 +346,7 @@ func (e ConnectionError) Unwrap() error {
 }
 
 func (rq *defaultRequester) dispatch(ctx context.Context, method, urlpath string, query url.Values, headers map[string]string, body io.Reader) (*http.Response, error) {
+	defer trace.StartRegion(ctx, "pebble.client.attempt").End()
 	// Do not mutate the requester baseURL.
 	u := *rq.baseURL
 	u.Path = path.Join(rq.baseURL.Path, urlpath)
@@ -333,8 +370,10 @@ func (rq *defaultRequester) dispatch(ctx context.Context, method, urlpath string
 
 	rsp, err := rq.doer.Do(req)
 	if err != nil {
+		trace.Logf(ctx, "attempt", "error=%v", err)
 		return nil, ConnectionError{err}
 	}
+	trace.Logf(ctx, "attempt", "status=%d", rsp.StatusCode)
 
 	return rsp, nil
 }
@@ -364,7 +403,8 @@ func (rq *defaultRequester) retry(ctx context.Context, method, urlpath string, q
 	timeout := time.After(doTimeout)
 	var rsp *http.Response
 	var err error
-	for {
+	for attempt := 1; ; attempt++ {
+		trace.Logf(ctx, "attempt", "number=%d", attempt)
 		rsp, err = rq.dispatch(ctx, method, urlpath, query, headers, body)
 		if err == nil || method != "GET" {
 			break
@@ -388,10 +428,20 @@ func (rq *defaultRequester) retry(ctx context.Context, method, urlpath string, q
 // Do performs the HTTP request according to the provided options, possibly retrying GET requests
 // if appropriate for the status reported by the server.
 func (rq *defaultRequester) Do(ctx context.Context, opts *RequestOptions) (*RequestResponse, error) {
+	ctx, end := trace.NewTask(ctx, "pebble.client")
+	endOnReturn := true
+	defer func() {
+		if endOnReturn {
+			end.End()
+		}
+	}()
+	trace.Logf(ctx, "request", "%s %s", opts.Method, opts.Path)
+
 	httpResp, err := rq.retry(ctx, opts.Method, opts.Path, opts.Query, opts.Headers, opts.Body)
 	if err != nil {
 		return nil, err
 	}
+	trace.Logf(ctx, "response", "status=%d", httpResp.StatusCode)
 
 	var idCert *x509.Certificate
 	// If this is a TLS connection, extract the server identity certificate
@@ -402,11 +452,16 @@ func (rq *defaultRequester) Do(ctx context.Context, opts *RequestOptions) (*Requ
 
 	// Is the result expecting a caller-managed raw body?
 	if opts.Type == RawRequest {
+		endOnReturn = false
 		return &RequestResponse{
 			StatusCode:      httpResp.StatusCode,
 			Headers:         httpResp.Header,
 			TLSServerIDCert: idCert,
-			Body:            httpResp.Body,
+			Body: &tracedResponseBody{
+				body: httpResp.Body,
+				ctx:  ctx,
+				task: end,
+			},
 		}, nil
 	}
 
@@ -749,6 +804,9 @@ func (rq *defaultRequester) Transport() *http.Transport {
 }
 
 func (rq *defaultRequester) getWebsocket(urlPath string) (clientWebsocket, error) {
+	ctx := context.TODO()
+	defer trace.StartRegion(ctx, "pebble.websocket.handshake").End()
+	trace.Logf(ctx, "handshake", "path=%s", urlPath)
 	dialer := websocket.Dialer{
 		NetDialContext:   rq.transport.DialContext,
 		Proxy:            rq.transport.Proxy,
@@ -767,6 +825,12 @@ func (rq *defaultRequester) getWebsocket(urlPath string) (clientWebsocket, error
 		r.SetBasicAuth(rq.basicUsername, rq.basicPassword)
 	}
 	conn, resp, err := dialer.Dial(url, r.Header)
+	if resp != nil {
+		trace.Logf(ctx, "handshake", "status=%d", resp.StatusCode)
+	}
+	if err != nil {
+		trace.Logf(ctx, "handshake", "error=%v", err)
+	}
 	if errors.Is(err, websocket.ErrBadHandshake) {
 		// FIXME: gorilla truncates the response body to 1024 characters.
 		// If parsing fails, the real error should appear in the server logs.
