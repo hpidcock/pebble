@@ -15,6 +15,7 @@
 package workloads_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -277,13 +278,13 @@ func (s *workloadsSuite) TestWorkloadsSectionExtensionSchema(c *C) {
 func parseCombineLayers(yamls []string) (*plan.Layer, error) {
 	var layers []*plan.Layer
 	for i, yaml := range yamls {
-		layer, err := plan.ParseLayer(i, fmt.Sprintf("test-plan-layer-%v", i), []byte(yaml))
+		layer, err := plan.ParseLayer(context.Background(), i, fmt.Sprintf("test-plan-layer-%v", i), []byte(yaml))
 		if err != nil {
 			return nil, err
 		}
 		layers = append(layers, layer)
 	}
-	return plan.CombineLayers(layers...)
+	return plan.CombineLayers(context.Background(), layers...)
 }
 
 func layerYAML(c *C, layer *plan.Layer) string {

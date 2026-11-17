@@ -15,6 +15,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,12 +252,12 @@ func (s *apiSuite) testHealthStateLockNotHeld(c *C, level string, expectErr bool
 		Dir:        s.pebbleDir,
 		SocketPath: s.pebbleDir + ".pebble.socket",
 	}
-	daemon, err := New(daemonOpts)
+	daemon, err := New(context.Background(), daemonOpts)
 	c.Assert(err, IsNil)
-	c.Assert(daemon.Init(), IsNil)
-	c.Assert(daemon.Start(), IsNil)
+	c.Assert(daemon.Init(context.Background()), IsNil)
+	c.Assert(daemon.Start(context.Background()), IsNil)
 	defer func() {
-		c.Assert(daemon.Stop(nil), IsNil)
+		c.Assert(daemon.Stop(context.Background(), nil), IsNil)
 	}()
 
 	// Acquire state lock so that the health endpoint can't.

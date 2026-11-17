@@ -87,7 +87,7 @@ func v1PostExec(c *Command, req *http.Request, user *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(req.Context())
 
 	args := &cmdstate.ExecArgs{
 		Command:     payload.Command,

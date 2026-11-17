@@ -15,6 +15,7 @@
 package identities
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -65,7 +66,7 @@ func NewManager(st *state.State) (*Manager, error) {
 	return m, nil
 }
 
-func (m *Manager) Ensure() error {
+func (m *Manager) Ensure(ctx context.Context) error {
 	return nil
 }
 

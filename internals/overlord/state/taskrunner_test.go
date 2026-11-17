@@ -15,6 +15,7 @@
 package state_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -43,7 +44,7 @@ type stateBackend struct {
 	ensureBeforeSeen chan<- bool
 }
 
-func (b *stateBackend) Checkpoint([]byte) error {
+func (b *stateBackend) Checkpoint(context.Context, []byte) error {
 	return nil
 }
 
@@ -65,7 +66,7 @@ func (b *stateBackend) NeedsCheckpoint() bool {
 func ensureChange(c *C, r *state.TaskRunner, sb *stateBackend, chg *state.Change) {
 	for range 20 {
 		sb.ensureBefore = time.Hour
-		r.Ensure()
+		r.Ensure(context.Background())
 		r.Wait()
 		chg.State().Lock()
 		s := chg.Status()
@@ -196,7 +197,7 @@ func (ts *taskRunnerSuite) TestSequenceTests(c *C) {
 		st.Lock()
 
 		// Delete previous changes.
-		st.Prune(past, 1, 1, 1, 1)
+		st.Prune(context.Background(), past, 1, 1, 1, 1)
 
 		chg := st.NewChange("install", "...")
 		tasks := make(map[string]*state.Task)
@@ -568,7 +569,7 @@ func (ts *taskRunnerSuite) TestExternalAbort(c *C) {
 	chg.AddTask(t)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	<-ch
 
 	st.Lock()
@@ -646,7 +647,7 @@ func (ts *taskRunnerSuite) TestUndoSingleLane(c *C) {
 
 	var done bool
 	for !done {
-		c.Assert(r.Ensure(), Equals, nil)
+		c.Assert(r.Ensure(context.Background()), Equals, nil)
 		st.Lock()
 		done = chg.IsReady() && chg.IsClean()
 		st.Unlock()
@@ -694,7 +695,7 @@ func (ts *taskRunnerSuite) TestStopHandlerJustFinishing(c *C) {
 	chg.AddTask(t)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	<-ch
 	r.Stop()
 
@@ -734,7 +735,7 @@ func (ts *taskRunnerSuite) TestStopKinds(c *C) {
 	chg.AddTask(t2)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	<-ch1
 	<-ch2
 	r.StopKinds("just-finish1")
@@ -770,7 +771,7 @@ func (ts *taskRunnerSuite) TestErrorsOnStopAreRetried(c *C) {
 	chg.AddTask(t)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	<-ch
 	r.Stop()
 
@@ -800,7 +801,7 @@ func (ts *taskRunnerSuite) TestStopAskForRetry(c *C) {
 	chg.AddTask(t)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	<-ch
 	r.Stop()
 
@@ -827,7 +828,7 @@ func (ts *taskRunnerSuite) testTaskReturningWait(c *C, waitedStatus, expectedSta
 	chg.AddTask(t)
 	st.Unlock()
 
-	r.Ensure()
+	r.Ensure(context.Background())
 	// wait for handler to finish
 	r.Wait()
 
@@ -840,7 +841,7 @@ func (ts *taskRunnerSuite) testTaskReturningWait(c *C, waitedStatus, expectedSta
 	st.Unlock()
 	defer st.Lock()
 	// does nothing
-	r.Ensure()
+	r.Ensure(context.Background())
 
 	// state is unchanged
 	st.Lock()
@@ -889,7 +890,7 @@ func (ts *taskRunnerSuite) TestRetryAfterDuration(c *C) {
 	tock := time.Now()
 	restore := state.FakeTime(tock)
 	defer restore()
-	r.Ensure() // will run and be rescheduled in a minute
+	r.Ensure(context.Background()) // will run and be rescheduled in a minute
 	select {
 	case <-ensureBeforeTick:
 	case <-time.After(2 * time.Second):
@@ -908,7 +909,7 @@ func (ts *taskRunnerSuite) TestRetryAfterDuration(c *C) {
 	state.FakeTime(tock.Add(5 * time.Second))
 	sb.ensureBefore = time.Hour
 	st.Unlock()
-	r.Ensure() // too soon
+	r.Ensure(context.Background()) // too soon
 	st.Lock()
 
 	c.Check(t.Status(), Equals, state.DoingStatus)
@@ -919,7 +920,7 @@ func (ts *taskRunnerSuite) TestRetryAfterDuration(c *C) {
 	state.FakeTime(schedule)
 	sb.ensureBefore = time.Hour
 	st.Unlock()
-	r.Ensure() // time to run again
+	r.Ensure(context.Background()) // time to run again
 	select {
 	case <-ch:
 	case <-time.After(2 * time.Second):
@@ -969,7 +970,7 @@ func (ts *taskRunnerSuite) testTaskSerialization(c *C, setupBlocked func(r *stat
 	chg.AddTask(t2)
 	st.Unlock()
 
-	r.Ensure() // will start only one, do1
+	r.Ensure(context.Background()) // will start only one, do1
 
 	select {
 	case <-ch1:
@@ -980,7 +981,7 @@ func (ts *taskRunnerSuite) testTaskSerialization(c *C, setupBlocked func(r *stat
 	c.Check(ensureBeforeTick, HasLen, 0)
 	c.Check(ch2, HasLen, 0)
 
-	r.Ensure() // won't yet start anything new
+	r.Ensure(context.Background()) // won't yet start anything new
 
 	c.Check(ensureBeforeTick, HasLen, 0)
 	c.Check(ch2, HasLen, 0)
@@ -1000,7 +1001,7 @@ func (ts *taskRunnerSuite) testTaskSerialization(c *C, setupBlocked func(r *stat
 	}
 	c.Check(sb.ensureBefore, Equals, time.Duration(0))
 
-	r.Ensure() // will start do2
+	r.Ensure(context.Background()) // will start do2
 
 	select {
 	case <-ch2:
@@ -1072,9 +1073,9 @@ func (ts *taskRunnerSuite) TestPrematureChangeReady(c *C) {
 	chg.AddTask(t2)
 	st.Unlock()
 
-	r.Ensure() // Error
+	r.Ensure(context.Background()) // Error
 	r.Wait()
-	r.Ensure() // Block on undo
+	r.Ensure(context.Background()) // Block on undo
 	<-ch
 
 	defer func() {
@@ -1248,15 +1249,15 @@ func (ts *taskRunnerSuite) TestCleanup(c *C) {
 	// First time it errors, then it works, then it's ignored.
 	c.Assert(chgIsClean(), Equals, false)
 	c.Assert(called, Equals, 0)
-	r.Ensure()
+	r.Ensure(context.Background())
 	r.Wait()
 	c.Assert(chgIsClean(), Equals, false)
 	c.Assert(called, Equals, 1)
-	r.Ensure()
+	r.Ensure(context.Background())
 	r.Wait()
 	c.Assert(chgIsClean(), Equals, true)
 	c.Assert(called, Equals, 2)
-	r.Ensure()
+	r.Ensure(context.Background())
 	r.Wait()
 	c.Assert(chgIsClean(), Equals, true)
 	c.Assert(called, Equals, 2)

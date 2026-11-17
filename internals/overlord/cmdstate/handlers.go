@@ -74,7 +74,7 @@ func (m *CommandManager) doExec(task *state.Task, tomb *tomb.Tomb) error {
 	st := task.State()
 	st.Lock()
 	setupObj := st.Cached(execSetupKey{task.ID()})
-	st.Unlock()
+	st.UnlockWithContext(task.TraceContext())
 	setup, ok := setupObj.(*execSetup)
 	if !ok || setup == nil {
 		// A previously-run task was in Doing status when the daemon was killed,
@@ -121,7 +121,9 @@ func (m *CommandManager) doExec(task *state.Task, tomb *tomb.Tomb) error {
 	}()
 
 	// Run the command! Killing the tomb will terminate the command.
-	ctx := tomb.Context(context.Background())
+	// Keep the trace parent, but do not tie command execution to the
+	// lifetime of the HTTP request that initiated it.
+	ctx := tomb.Context(context.WithoutCancel(task.TraceContext()))
 	return e.do(ctx, task)
 }
 
@@ -250,7 +252,7 @@ func (e *execution) do(ctx context.Context, task *state.Task) error {
 			}
 		}
 
-		go e.controlLoop(task.ID(), pidCh, stopControl, int(master.Fd()))
+		go e.controlLoop(ctx, task.ID(), pidCh, stopControl, int(master.Fd()))
 
 		// Start goroutine to mirror PTY output to "stdio" websocket.
 		ioConn := e.getWebsocket(wsStdio)
@@ -291,7 +293,7 @@ func (e *execution) do(ctx context.Context, task *state.Task) error {
 	} else {
 		// No PTY/terminal, all I/O uses pipes.
 
-		go e.controlLoop(task.ID(), pidCh, stopControl, -1)
+		go e.controlLoop(ctx, task.ID(), pidCh, stopControl, -1)
 
 		// Start goroutine to receive stdin from "stdio" websocket and write to
 		// cmd.Stdin pipe.
@@ -441,7 +443,7 @@ func (e *execution) do(ctx context.Context, task *state.Task) error {
 func setExitCode(task *state.Task, exitCode int) {
 	st := task.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(task.TraceContext())
 	task.Set("api-data", map[string]any{
 		"exit-code": exitCode,
 	})
@@ -462,7 +464,7 @@ type execResizeArgs struct {
 	Height int `json:"height"`
 }
 
-func (e *execution) controlLoop(execID string, pidCh <-chan int, stop <-chan struct{}, ptyFd int) {
+func (e *execution) controlLoop(ctx context.Context, execID string, pidCh <-chan int, stop <-chan struct{}, ptyFd int) {
 	logger.Debugf("Exec %s: control handler waiting", execID)
 	defer logger.Debugf("Exec %s: control handler finished", execID)
 
@@ -527,7 +529,7 @@ func (e *execution) controlLoop(execID string, pidCh <-chan int, stop <-chan str
 				logger.Noticef(`Exec %s: control command "resize" cannot set terminal size to %dx%d: %v`, execID, w, h, err)
 				continue
 			}
-			trace.Logf(context.TODO(), "exec.control", "exec=%s command=resize width=%d height=%d", execID, w, h)
+			trace.Logf(ctx, "exec.control", "exec=%s command=resize width=%d height=%d", execID, w, h)
 			logger.Debugf(`Exec %s: PID %d terminal resized to %dx%d`, execID, pid, w, h)
 		case command.Command == "signal":
 			if command.Signal == nil {
@@ -546,7 +548,7 @@ func (e *execution) controlLoop(execID string, pidCh <-chan int, stop <-chan str
 				logger.Noticef(`Exec %s: control command "signal" cannot forward %s to PID %d: %v`, execID, name, pid, err)
 				continue
 			}
-			trace.Logf(context.TODO(), "exec.control", "exec=%s command=signal signal=%s", execID, name)
+			trace.Logf(ctx, "exec.control", "exec=%s command=signal signal=%s", execID, name)
 			logger.Noticef("Exec %s: forwarded signal %s to PID %d", execID, name, pid)
 		default:
 			logger.Noticef("Exec %s: invalid control websocket command %q", execID, command.Command)

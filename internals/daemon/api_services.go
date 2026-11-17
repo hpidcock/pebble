@@ -109,7 +109,7 @@ func v1PostServices(c *Command, r *http.Request, _ *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 
 	var taskSet *state.TaskSet
 	var lanes [][]string
@@ -196,7 +196,7 @@ func v1PostServices(c *Command, r *http.Request, _ *UserState) Response {
 		// want to introduce a listener system for replan, but for now we keep
 		// it simple.
 		checkmgr := c.d.overlord.CheckManager()
-		checkmgr.Replan()
+		checkmgr.Replan(r.Context())
 
 	default:
 		return BadRequest("invalid action %q", payload.Action)

@@ -161,6 +161,14 @@ func (a byReadyTime) Len() int           { return len(a) }
 func (a byReadyTime) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a byReadyTime) Less(i, j int) bool { return a[i].readyTime.Before(a[j].readyTime) }
 
+// TraceContext returns the context associated with the change's execution trace.
+func (c *Change) TraceContext() context.Context {
+	if c.traceCtx != nil {
+		return c.traceCtx
+	}
+	return context.Background()
+}
+
 func newChange(pctx context.Context, state *State, id, kind, summary string) *Change {
 	ctx, end := trace.NewTask(pctx, "pebble.change")
 	trace.Logf(ctx, "details", "id=%s kind=%s summary=%s", id, kind, summary)

@@ -16,6 +16,7 @@ package plan_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1518,7 +1519,7 @@ func (s *S) TestParseLayer(c *C) {
 		var sup plan.Plan
 		var err error
 		for i, yml := range test.input {
-			layer, e := plan.ParseLayer(i, fmt.Sprintf("layer-%d", i), reindent(yml))
+			layer, e := plan.ParseLayer(context.Background(), i, fmt.Sprintf("layer-%d", i), reindent(yml))
 			if e != nil {
 				err = e
 				break
@@ -1530,7 +1531,7 @@ func (s *S) TestParseLayer(c *C) {
 		}
 		if err == nil {
 			var result *plan.Layer
-			result, err = plan.CombineLayers(sup.Layers...)
+			result, err = plan.CombineLayers(context.Background(), sup.Layers...)
 			if err == nil && test.result != nil {
 				c.Assert(result, DeepEquals, test.result)
 			}
@@ -1564,7 +1565,7 @@ func (s *S) TestParseLayer(c *C) {
 					LogTargets: result.LogTargets,
 					Sections:   result.Sections,
 				}
-				err = p.Validate()
+				err = p.Validate(context.Background())
 			}
 		}
 		if err != nil || test.error != "" {
@@ -1579,7 +1580,7 @@ func (s *S) TestParseLayer(c *C) {
 
 func (s *S) TestCombineLayersCycle(c *C) {
 	// Even if individual layers don't have cycles, combined layers might.
-	layer1, err := plan.ParseLayer(1, "label1", []byte(`
+	layer1, err := plan.ParseLayer(context.Background(), 1, "label1", []byte(`
 services:
     srv1:
         override: replace
@@ -1588,7 +1589,7 @@ services:
             - srv2
 `))
 	c.Assert(err, IsNil)
-	layer2, err := plan.ParseLayer(2, "label2", []byte(`
+	layer2, err := plan.ParseLayer(context.Background(), 2, "label2", []byte(`
 services:
     srv2:
         override: replace
@@ -1597,7 +1598,7 @@ services:
             - srv1
 `))
 	c.Assert(err, IsNil)
-	combined, err := plan.CombineLayers(layer1, layer2)
+	combined, err := plan.CombineLayers(context.Background(), layer1, layer2)
 	c.Assert(err, IsNil)
 	layers := []*plan.Layer{layer1, layer2}
 	p := &plan.Plan{
@@ -1607,22 +1608,22 @@ services:
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	err = p.Validate()
+	err = p.Validate(context.Background())
 	c.Assert(err, ErrorMatches, `services in before/after loop: .*`)
 	_, ok := err.(*plan.FormatError)
 	c.Assert(ok, Equals, true, Commentf("error must be *plan.FormatError, not %T", err))
 }
 
 func (s *S) TestMissingOverride(c *C) {
-	layer1, err := plan.ParseLayer(1, "label1", []byte("{}"))
+	layer1, err := plan.ParseLayer(context.Background(), 1, "label1", []byte("{}"))
 	c.Assert(err, IsNil)
-	layer2, err := plan.ParseLayer(2, "label2", []byte(`
+	layer2, err := plan.ParseLayer(context.Background(), 2, "label2", []byte(`
 services:
     srv1:
         command: cmd
 `))
 	c.Assert(err, IsNil)
-	_, err = plan.CombineLayers(layer1, layer2)
+	_, err = plan.CombineLayers(context.Background(), layer1, layer2)
 	c.Check(err, ErrorMatches, `layer "label2" must define \"override\" for service "srv1"`)
 	_, ok := err.(*plan.FormatError)
 	c.Check(ok, Equals, true, Commentf("error must be *plan.FormatError, not %T", err))
@@ -1630,15 +1631,15 @@ services:
 
 func (s *S) TestMissingCommand(c *C) {
 	// Combine fails if no command in combined plan
-	layer1, err := plan.ParseLayer(1, "label1", []byte("{}"))
+	layer1, err := plan.ParseLayer(context.Background(), 1, "label1", []byte("{}"))
 	c.Assert(err, IsNil)
-	layer2, err := plan.ParseLayer(2, "label2", []byte(`
+	layer2, err := plan.ParseLayer(context.Background(), 2, "label2", []byte(`
 services:
     srv1:
         override: merge
 `))
 	c.Assert(err, IsNil)
-	combined, err := plan.CombineLayers(layer1, layer2)
+	combined, err := plan.CombineLayers(context.Background(), layer1, layer2)
 	c.Assert(err, IsNil)
 	layers := []*plan.Layer{layer1, layer2}
 	p := &plan.Plan{
@@ -1648,26 +1649,26 @@ services:
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	err = p.Validate()
+	err = p.Validate(context.Background())
 	c.Check(err, ErrorMatches, `plan must define "command" for service "srv1"`)
 	_, ok := err.(*plan.FormatError)
 	c.Check(ok, Equals, true, Commentf("error must be *plan.FormatError, not %T", err))
 
 	// Combine succeeds if there is a command in combined plan
-	layer1, err = plan.ParseLayer(1, "label1", []byte(`
+	layer1, err = plan.ParseLayer(context.Background(), 1, "label1", []byte(`
 services:
     srv1:
         override: merge
         command: foo --bar
 `))
 	c.Assert(err, IsNil)
-	layer2, err = plan.ParseLayer(2, "label2", []byte(`
+	layer2, err = plan.ParseLayer(context.Background(), 2, "label2", []byte(`
 services:
     srv1:
         override: merge
 `))
 	c.Assert(err, IsNil)
-	combined, err = plan.CombineLayers(layer1, layer2)
+	combined, err = plan.CombineLayers(context.Background(), layer1, layer2)
 	c.Assert(err, IsNil)
 	c.Assert(combined.Services["srv1"].Command, Equals, "foo --bar")
 }
@@ -1686,10 +1687,10 @@ func (s *S) TestReadDir(c *C) {
 			err := os.WriteFile(filepath.Join(layersDir, fmt.Sprintf("%03d-layer-%d.yaml", i, i)), reindent(yml), 0644)
 			c.Assert(err, IsNil)
 		}
-		sup, err := plan.ReadDir(layersDir, nil)
+		sup, err := plan.ReadDir(context.Background(), layersDir, nil)
 		if err == nil {
 			var result *plan.Layer
-			result, err = plan.CombineLayers(sup.Layers...)
+			result, err = plan.CombineLayers(context.Background(), sup.Layers...)
 			if err == nil && test.result != nil {
 				c.Assert(result, DeepEquals, test.result)
 			}
@@ -1746,7 +1747,7 @@ func (s *S) TestReadDirBadNames(c *C) {
 		fpath := filepath.Join(layersDir, fname)
 		err := os.WriteFile(fpath, []byte("<ignore>"), 0644)
 		c.Assert(err, IsNil)
-		_, err = plan.ReadDir(layersDir, nil)
+		_, err = plan.ReadDir(context.Background(), layersDir, nil)
 		c.Assert(err.Error(), Equals, fmt.Sprintf("invalid layer filename: %q (must look like \"123-some-label.yaml\")", fname))
 		err = os.Remove(fpath)
 		c.Assert(err, IsNil)
@@ -1770,7 +1771,7 @@ func (s *S) TestReadDirDupNames(c *C) {
 			err := os.WriteFile(fpath, []byte("summary: ignore"), 0644)
 			c.Assert(err, IsNil)
 		}
-		_, err = plan.ReadDir(layersDir, nil)
+		_, err = plan.ReadDir(context.Background(), layersDir, nil)
 		c.Assert(err.Error(), Equals, fmt.Sprintf("invalid layer filename: %q not unique (have %q already)", fnames[1], fnames[0]))
 		for _, fname := range fnames {
 			fpath := filepath.Join(layersDir, fname)
@@ -1810,7 +1811,7 @@ func (s *S) TestMarshalLayer(c *C) {
 			srv3:
 				override: replace
 				command: srv3cmd`)
-	layer, err := plan.ParseLayer(1, "layer1", layerBytes)
+	layer, err := plan.ParseLayer(context.Background(), 1, "layer1", layerBytes)
 	c.Assert(err, IsNil)
 	out, err := yaml.Marshal(layer)
 	c.Assert(err, IsNil)
@@ -2067,7 +2068,7 @@ func (s *S) TestMergeServiceContextOverrides(c *C) {
 
 func (s *S) TestPebbleLabelPrefixReserved(c *C) {
 	// Validate fails if layer label has the reserved prefix "pebble-"
-	_, err := plan.ParseLayer(0, "pebble-foo", []byte("{}"))
+	_, err := plan.ParseLayer(context.Background(), 0, "pebble-foo", []byte("{}"))
 	c.Check(err, ErrorMatches, `cannot use reserved label prefix "pebble-"`)
 }
 
@@ -2255,7 +2256,7 @@ func firstLetterToLower(s string) string {
 // TestSectionOrder ensures built-in section order is maintained
 // during Plan marshal operations.
 func (s *S) TestSectionOrder(c *C) {
-	layer, err := plan.ParseLayer(1, "label", reindent(`
+	layer, err := plan.ParseLayer(context.Background(), 1, "label", reindent(`
 	checks:
 		chk1:
 			override: replace
@@ -2271,7 +2272,7 @@ func (s *S) TestSectionOrder(c *C) {
 			override: replace
 			command: cmd`))
 	c.Assert(err, IsNil)
-	combined, err := plan.CombineLayers(layer)
+	combined, err := plan.CombineLayers(context.Background(), layer)
 	c.Assert(err, IsNil)
 	plan := plan.Plan{
 		Services:   combined.Services,
@@ -2419,7 +2420,7 @@ func (s *S) TestReadLayersDir(c *C) {
 			createLayerPath(c, tempDir, layerName)
 		}
 
-		layers, err := plan.ReadLayersDir(tempDir)
+		layers, err := plan.ReadLayersDir(context.Background(), tempDir)
 		if test.error != "" || err != nil {
 			c.Assert(err, ErrorMatches, test.error)
 		}
@@ -2492,7 +2493,7 @@ func (s *S) TestReadDirWithBasePlan(c *C) {
 	err = os.WriteFile(filepath.Join(layersDir, "002-app.yaml"), reindent(layer2), 0644)
 	c.Assert(err, IsNil)
 
-	finalPlan, err := plan.ReadDir(layersDir, basePlan)
+	finalPlan, err := plan.ReadDir(context.Background(), layersDir, basePlan)
 	c.Assert(err, IsNil)
 
 	c.Assert(len(finalPlan.Layers), Equals, 3)
@@ -2531,7 +2532,7 @@ func (s *S) TestReadDirWithBasePlanOnly(c *C) {
 
 	nonExistentDir := filepath.Join(c.MkDir(), "does-not-exist")
 
-	finalPlan, err := plan.ReadDir(nonExistentDir, basePlan)
+	finalPlan, err := plan.ReadDir(context.Background(), nonExistentDir, basePlan)
 	c.Assert(err, IsNil)
 
 	c.Assert(len(finalPlan.Layers), Equals, 1)
@@ -2557,7 +2558,7 @@ func (s *S) TestReadDirBasePlanValidation(c *C) {
 	err := os.WriteFile(filepath.Join(tempDir, "001-empty.yaml"), []byte("{}"), 0644)
 	c.Assert(err, IsNil)
 
-	_, err = plan.ReadDir(tempDir, basePlan)
+	_, err = plan.ReadDir(context.Background(), tempDir, basePlan)
 	c.Assert(err, ErrorMatches, `plan must define "command" for service "broken-svc"`)
 }
 
@@ -2574,7 +2575,7 @@ func (s *S) TestCheckNonPositiveDurations(c *C) {
 		{name: "negative timeout", field: "timeout", duration: "-1s", error: `plan check "check" timeout must not be negative`},
 	} {
 		c.Logf(test.name)
-		_, err := plan.ParseLayer(1, "layer-1", reindent(fmt.Sprintf(`
+		_, err := plan.ParseLayer(context.Background(), 1, "layer-1", reindent(fmt.Sprintf(`
 		checks:
 			check:
 				override: replace
@@ -2586,7 +2587,7 @@ func (s *S) TestCheckNonPositiveDurations(c *C) {
 
 func (s *S) TestHTTPCheckHostHeader(c *C) {
 	for _, header := range []string{"Host", "host", "HOST"} {
-		layer, err := plan.ParseLayer(1, "layer-1", reindent(fmt.Sprintf(`
+		layer, err := plan.ParseLayer(context.Background(), 1, "layer-1", reindent(fmt.Sprintf(`
 		checks:
 			chk1:
 				override: replace
@@ -2596,9 +2597,9 @@ func (s *S) TestHTTPCheckHostHeader(c *C) {
 						%s: example.com
 	`, header)))
 		c.Assert(err, IsNil)
-		combined, err := plan.CombineLayers(layer)
+		combined, err := plan.CombineLayers(context.Background(), layer)
 		c.Assert(err, IsNil)
-		err = (&plan.Plan{Checks: combined.Checks}).Validate()
+		err = (&plan.Plan{Checks: combined.Checks}).Validate(context.Background())
 		c.Assert(err, ErrorMatches, `cannot specify "Host" header for http check "chk1"`)
 	}
 }

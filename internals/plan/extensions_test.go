@@ -15,6 +15,7 @@
 package plan_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -399,7 +400,7 @@ nexttest:
 		}
 
 		// Load the plan layer from disk (parse, combine and validate).
-		p, err := plan.ReadDir(layersDir, nil)
+		p, err := plan.ReadDir(context.Background(), layersDir, nil)
 		if testData.error != "" || err != nil {
 			// Expected error.
 			c.Assert(err, ErrorMatches, testData.error)
@@ -443,7 +444,7 @@ func (s *S) TestSectionOrderExt(c *C) {
 		plan.UnregisterSectionExtension("y-field")
 	}()
 
-	layer, err := plan.ParseLayer(1, "label", reindent(`
+	layer, err := plan.ParseLayer(context.Background(), 1, "label", reindent(`
 		y-field:
 			y1:
 				override: replace
@@ -472,7 +473,7 @@ func (s *S) TestSectionOrderExt(c *C) {
 				override: replace
 				command: cmd`))
 	c.Assert(err, IsNil)
-	combined, err := plan.CombineLayers(layer)
+	combined, err := plan.CombineLayers(context.Background(), layer)
 	c.Assert(err, IsNil)
 	plan := plan.Plan{
 		Services:   combined.Services,

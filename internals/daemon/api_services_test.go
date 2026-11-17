@@ -448,17 +448,17 @@ services:
         override: replace
         command: sleep 10
 `)
-	daemon, err := New(&Options{
+	daemon, err := New(context.Background(), &Options{
 		Dir:        s.pebbleDir,
 		SocketPath: s.pebbleDir + ".pebble.socket",
 	})
 	c.Assert(err, IsNil)
-	err = daemon.Init()
+	err = daemon.Init(context.Background())
 	c.Assert(err, IsNil)
-	err = daemon.Start()
+	err = daemon.Start(context.Background())
 	c.Assert(err, IsNil)
 	s.d = daemon
-	defer daemon.Stop(nil)
+	defer daemon.Stop(context.Background(), nil)
 
 	// To try to reproduce the deadlock, call these endpoints in a loop:
 	// - GET /v1/services
@@ -542,6 +542,6 @@ services:
 			c.Fatal("timed out waiting for ready channel")
 		}
 	}
-	err = daemon.Stop(nil)
+	err = daemon.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 }

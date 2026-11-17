@@ -251,7 +251,7 @@ type Client struct {
 	getWebsocket getWebsocketFunc
 }
 
-type getWebsocketFunc func(urlPath string) (clientWebsocket, error)
+type getWebsocketFunc func(ctx context.Context, urlPath string) (clientWebsocket, error)
 
 type clientWebsocket interface {
 	wsutil.MessageReader
@@ -293,8 +293,8 @@ func New(config *Config) (*Client, error) {
 	}
 
 	client.requester = requester
-	client.getWebsocket = func(urlPath string) (clientWebsocket, error) {
-		return requester.getWebsocket(urlPath)
+	client.getWebsocket = func(ctx context.Context, urlPath string) (clientWebsocket, error) {
+		return requester.getWebsocket(ctx, urlPath)
 	}
 
 	return client, nil
@@ -304,9 +304,9 @@ func (client *Client) Requester() Requester {
 	return client.requester
 }
 
-func (client *Client) getTaskWebsocket(taskID, websocketID string) (clientWebsocket, error) {
+func (client *Client) getTaskWebsocket(ctx context.Context, taskID, websocketID string) (clientWebsocket, error) {
 	urlPath := fmt.Sprintf("/v1/tasks/%s/websocket/%s", taskID, websocketID)
-	return client.getWebsocket(urlPath)
+	return client.getWebsocket(ctx, urlPath)
 }
 
 // CloseIdleConnections closes any API connections that are currently unused.
@@ -803,8 +803,7 @@ func (rq *defaultRequester) Transport() *http.Transport {
 	return rq.transport
 }
 
-func (rq *defaultRequester) getWebsocket(urlPath string) (clientWebsocket, error) {
-	ctx := context.TODO()
+func (rq *defaultRequester) getWebsocket(ctx context.Context, urlPath string) (clientWebsocket, error) {
 	defer trace.StartRegion(ctx, "pebble.websocket.handshake").End()
 	trace.Logf(ctx, "handshake", "path=%s", urlPath)
 	dialer := websocket.Dialer{
@@ -824,7 +823,7 @@ func (rq *defaultRequester) getWebsocket(urlPath string) (clientWebsocket, error
 	if rq.basicUsername != "" && rq.basicPassword != "" {
 		r.SetBasicAuth(rq.basicUsername, rq.basicPassword)
 	}
-	conn, resp, err := dialer.Dial(url, r.Header)
+	conn, resp, err := dialer.DialContext(ctx, url, r.Header)
 	if resp != nil {
 		trace.Logf(ctx, "handshake", "status=%d", resp.StatusCode)
 	}

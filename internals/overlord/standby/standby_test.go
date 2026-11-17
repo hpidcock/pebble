@@ -18,6 +18,7 @@
 package standby_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -144,7 +145,7 @@ func (s *standbySuite) TestStartChecks(c *C) {
 		return opinion
 	}))
 
-	m.Start()
+	m.Start(context.Background())
 	ch1 <- false
 	c.Check(n, Equals, 0)
 	ch1 <- false
@@ -154,7 +155,7 @@ func (s *standbySuite) TestStartChecks(c *C) {
 	ch2 <- struct{}{}
 	c.Check(n, Equals, 1)
 
-	m.Stop()
+	m.Stop(context.Background())
 }
 
 func (s *standbySuite) TestStopWaits(c *C) {
@@ -185,13 +186,13 @@ func (s *standbySuite) TestStopWaits(c *C) {
 		return false
 	}))
 
-	m.Start()
+	m.Start(context.Background())
 
 	// let the opinionator start its delay
 	<-opineReady
 	go func() {
 		// this will block until standby stops
-		m.Stop()
+		m.Stop(context.Background())
 		close(ch)
 	}()
 

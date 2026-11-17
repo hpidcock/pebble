@@ -154,7 +154,7 @@ func v1GetChanges(c *Command, r *http.Request, _ *UserState) Response {
 
 	state := c.d.overlord.State()
 	state.Lock()
-	defer state.Unlock()
+	defer state.UnlockWithContext(r.Context())
 	chgs := state.Changes()
 	chgInfos := make([]*changeInfo, 0, len(chgs))
 	for _, chg := range chgs {
@@ -170,7 +170,7 @@ func v1GetChange(c *Command, r *http.Request, _ *UserState) Response {
 	changeID := r.PathValue("id")
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 	chg := st.Change(changeID)
 	if chg == nil {
 		return NotFound("cannot find change with id %q", changeID)
@@ -185,7 +185,7 @@ func v1GetChangeWait(c *Command, r *http.Request, _ *UserState) Response {
 	st := c.d.overlord.State()
 	st.Lock()
 	change := st.Change(changeID)
-	st.Unlock()
+	st.UnlockWithContext(r.Context())
 	if change == nil {
 		return NotFound("cannot find change with id %q", changeID)
 	}
@@ -221,7 +221,7 @@ func v1GetChangeWait(c *Command, r *http.Request, _ *UserState) Response {
 	}
 
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 	return SyncResponse(change2changeInfo(change))
 }
 
@@ -229,7 +229,7 @@ func v1PostChange(c *Command, r *http.Request, _ *UserState) Response {
 	chID := r.PathValue("id")
 	state := c.d.overlord.State()
 	state.Lock()
-	defer state.Unlock()
+	defer state.UnlockWithContext(r.Context())
 	chg := state.Change(chID)
 	if chg == nil {
 		return NotFound("cannot find change with id %q", chID)

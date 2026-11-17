@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -187,6 +188,7 @@ func setupTLSOptions(pebbleDir, httpsAddress string, persist overlord.PersistMod
 }
 
 func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
+	ctx := context.Background()
 	err := reaper.Start()
 	if err != nil {
 		return fmt.Errorf("cannot start child process reaper: %w", err)
@@ -233,11 +235,11 @@ func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
 	}
 	dopts.TLSOptions = tlsOpts
 
-	d, err := daemon.New(&dopts)
+	d, err := daemon.New(ctx, &dopts)
 	if err != nil {
 		return err
 	}
-	if err := d.Init(); err != nil {
+	if err := d.Init(ctx); err != nil {
 		return err
 	}
 
@@ -246,7 +248,7 @@ func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
 		if err != nil {
 			return err
 		}
-		if err := d.SetServiceArgs(mappedArgs); err != nil {
+		if err := d.SetServiceArgs(ctx, mappedArgs); err != nil {
 			return err
 		}
 	}
@@ -265,7 +267,7 @@ func runDaemon(rcmd *cmdRun, ch chan os.Signal, ready chan<- func()) error {
 	}
 
 	d.Version = cmd.Version
-	if err := d.Start(); err != nil {
+	if err := d.Start(ctx); err != nil {
 		return err
 	}
 
@@ -351,7 +353,7 @@ out:
 	// shutdown, and allow the Pebble process to exit faster.
 	rcmd.client.CloseIdleConnections()
 
-	return d.Stop(ch)
+	return d.Stop(ctx, ch)
 }
 
 // convert args from [][]string type to map[string][]string

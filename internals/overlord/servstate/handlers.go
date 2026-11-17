@@ -110,6 +110,7 @@ type serviceData struct {
 	backoffTime  time.Duration
 	resetTimer   *time.Timer
 	restarting   bool
+	traceParent  context.Context
 	traceCtx     context.Context
 	currentSince time.Time
 	startCount   atomic.Int64
@@ -120,14 +121,14 @@ func (m *ServiceManager) doStart(task *state.Task, tomb *tomb.Tomb) error {
 	m.state.Lock()
 	var started bool
 	task.Get("started", &started)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 	if started {
 		return fmt.Errorf("service already started, not retrying")
 	}
 
 	m.state.Lock()
 	request, err := TaskServiceRequest(task)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 	if err != nil {
 		return err
 	}
@@ -157,10 +158,10 @@ func (m *ServiceManager) doStart(task *state.Task, tomb *tomb.Tomb) error {
 
 	m.state.Lock()
 	task.Set("started", true)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 
 	// Start the service and transition to stateStarting.
-	err = service.start()
+	err = service.start(task.TraceContext())
 	if err != nil {
 		return err
 	}
@@ -246,7 +247,7 @@ func (m *ServiceManager) serviceForStart(config *plan.Service, workload *workloa
 func addTaskLog(task *state.Task, message string) {
 	st := task.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(task.TraceContext())
 
 	task.Logf("%s", message)
 }
@@ -254,7 +255,7 @@ func addTaskLog(task *state.Task, message string) {
 func (m *ServiceManager) doStop(task *state.Task, tomb *tomb.Tomb) error {
 	m.state.Lock()
 	request, err := TaskServiceRequest(task)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 	if err != nil {
 		return err
 	}
@@ -346,13 +347,14 @@ func (s *serviceData) transitionRestarting(state serviceState, restarting bool) 
 }
 
 // start is called to transition from the initial state and start the service.
-func (s *serviceData) start() error {
+func (s *serviceData) start(ctx context.Context) error {
 	s.manager.servicesLock.Lock()
 	defer s.manager.servicesLock.Unlock()
 
 	switch s.state {
 	case stateInitial:
-		err := s.startInternal()
+		s.traceParent = ctx
+		err := s.startInternal(ctx)
 		if err != nil {
 			s.transition(stateStopped)
 			return err
@@ -375,7 +377,7 @@ func logError(err error) {
 // startInternal is an internal helper used to actually start (or restart) the
 // command. It assumes the caller has ensures the service is in a valid state,
 // and it sets s.cmd and other relevant fields.
-func (s *serviceData) startInternal() error {
+func (s *serviceData) startInternal(ctx context.Context) error {
 	base, extra, err := s.config.ParseCommand()
 	if err != nil {
 		return err
@@ -483,7 +485,7 @@ func (s *serviceData) startInternal() error {
 
 	// Start the process!
 	logger.Noticef("Service %q starting: %s", serviceName, s.config.Command)
-	traceCtx, traceEnd := trace.NewTask(context.TODO(), "pebble.service")
+	traceCtx, traceEnd := trace.NewTask(ctx, "pebble.service")
 	trace.Logf(traceCtx, "details", "service=%s", serviceName)
 	err = reaper.StartCommand(s.cmd)
 	if err != nil {
@@ -636,7 +638,7 @@ func (s *serviceData) exited(exitCode int) error {
 func addLastLogs(task *state.Task, logBuffer *servicelog.RingBuffer, serviceName string) {
 	st := task.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(task.TraceContext())
 
 	logs, err := servicelog.ServiceLastLines(logBuffer, lastLogLines, "    ", serviceName)
 	if err != nil {
@@ -776,7 +778,7 @@ func (s *serviceData) backoffTimeElapsed() error {
 
 	switch s.state {
 	case stateBackoff:
-		err := s.startInternal()
+		err := s.startInternal(s.traceParent)
 		if err != nil {
 			return err
 		}

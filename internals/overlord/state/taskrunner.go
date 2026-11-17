@@ -189,7 +189,7 @@ func taskTraceContext(t *Task) context.Context {
 	if chg := t.Change(); chg != nil && chg.traceCtx != nil {
 		return chg.traceCtx
 	}
-	return context.TODO()
+	return context.Background()
 }
 
 // run must be called with the state lock in place
@@ -226,6 +226,7 @@ func (r *TaskRunner) run(t *Task) {
 	tomb.Go(func() error {
 		ctx, end := trace.NewTask(traceCtx, "pebble.task")
 		defer end.End()
+		t.traceCtx = ctx
 		trace.Logf(ctx, "details", "change=%s task=%s kind=%s status=%s", t.change, t.ID(), t.Kind(), status)
 
 		// Capture the error result with tomb.Kill so we can
@@ -239,7 +240,7 @@ func (r *TaskRunner) run(t *Task) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.state.Lock()
-		defer r.state.Unlock()
+		defer r.state.UnlockWithContext(ctx)
 		accuRuntime(t1.Sub(t0))
 
 		delete(r.tombs, t.ID())
@@ -343,6 +344,7 @@ func (r *TaskRunner) clean(t *Task) {
 	tomb.Go(func() error {
 		ctx, end := trace.NewTask(traceCtx, "pebble.task.cleanup")
 		defer end.End()
+		t.traceCtx = ctx
 		trace.Logf(ctx, "details", "change=%s task=%s kind=%s", t.change, t.ID(), t.Kind())
 		tomb.Kill(cleanup(t, tomb))
 
@@ -350,7 +352,7 @@ func (r *TaskRunner) clean(t *Task) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.state.Lock()
-		defer r.state.Unlock()
+		defer r.state.UnlockWithContext(ctx)
 
 		delete(r.tombs, t.ID())
 
@@ -400,8 +402,7 @@ func (r *TaskRunner) tryUndo(t *Task) {
 // Ensure starts new goroutines for all known tasks with no pending
 // dependencies.
 // Note that Ensure will lock the state.
-func (r *TaskRunner) Ensure() error {
-	ctx := context.TODO()
+func (r *TaskRunner) Ensure(ctx context.Context) error {
 	defer trace.StartRegion(ctx, "pebble.task.ensure").End()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -413,7 +414,7 @@ func (r *TaskRunner) Ensure() error {
 
 	// Locks must be acquired in the same order everywhere.
 	r.state.Lock()
-	defer r.state.Unlock()
+	defer r.state.UnlockWithContext(ctx)
 
 	r.someBlocked = false
 	var blockedCount, waiting, scheduled, started, cleanups int

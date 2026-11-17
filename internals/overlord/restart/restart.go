@@ -18,6 +18,7 @@
 package restart
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 
@@ -110,7 +111,7 @@ func ClearReboot(st *state.State) {
 
 // Ensure implements StateManager.Ensure. Required by StateEngine, we
 // actually do nothing here.
-func (rm *RestartManager) Ensure() error {
+func (rm *RestartManager) Ensure(ctx context.Context) error {
 	return nil
 }
 

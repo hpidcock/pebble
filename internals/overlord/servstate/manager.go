@@ -1,6 +1,7 @@
 package servstate
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -64,7 +65,7 @@ func NewManager(s *state.State, runner *state.TaskRunner, serviceOutput io.Write
 }
 
 // PlanChanged informs the service manager that the plan has been updated.
-func (m *ServiceManager) PlanChanged(plan *plan.Plan) {
+func (m *ServiceManager) PlanChanged(ctx context.Context, plan *plan.Plan) {
 	m.planLock.Lock()
 	defer m.planLock.Unlock()
 	m.plan = plan
@@ -87,7 +88,7 @@ func (m *ServiceManager) getPlan() *plan.Plan {
 }
 
 // Ensure implements StateManager.Ensure.
-func (m *ServiceManager) Ensure() error {
+func (m *ServiceManager) Ensure(ctx context.Context) error {
 	return nil
 }
 

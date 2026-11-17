@@ -63,7 +63,7 @@ func v1PostLayers(c *Command, r *http.Request, user *UserState) Response {
 	if payload.Format != "yaml" {
 		return BadRequest("invalid format %q", payload.Format)
 	}
-	layer, err := plan.ParseLayer(0, payload.Label, []byte(payload.Layer))
+	layer, err := plan.ParseLayer(r.Context(), 0, payload.Label, []byte(payload.Layer))
 	if err != nil {
 		return BadRequest("cannot parse layer YAML: %v", err)
 	}
@@ -72,9 +72,9 @@ func v1PostLayers(c *Command, r *http.Request, user *UserState) Response {
 
 	planMgr := overlordPlanManager(c.d.overlord)
 	if payload.Combine {
-		err = planMgr.CombineLayer(layer, payload.Inner)
+		err = planMgr.CombineLayer(r.Context(), layer, payload.Inner)
 	} else {
-		err = planMgr.AppendLayer(layer, payload.Inner)
+		err = planMgr.AppendLayer(r.Context(), layer, payload.Inner)
 	}
 	if err != nil {
 		if _, ok := err.(*planstate.LabelExists); ok {

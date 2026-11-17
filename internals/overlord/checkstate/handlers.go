@@ -34,7 +34,7 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 	var details checkDetails
 	err := task.Get(checkDetailsAttr, &details)
 	config := m.state.Cached(performConfigKey{changeID}).(*plan.Check) // panic if key not present (always should be)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 	if err != nil {
 		return fmt.Errorf("cannot get check details for perform-check task %q: %v", task.ID(), err)
 	}
@@ -52,8 +52,9 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 	chk := newChecker(config)
 
 	performCheck := func() (shouldExit bool, err error) {
-		//lint:ignore SA1012 providing a nil context to tomb.Context() is valid
-		err = runCheck(tomb.Context(nil), config.Name, chk, config.Timeout.Value)
+		// Retain the trace parent without cancelling checks when the
+		// request that initiated them finishes.
+		err = runCheck(tomb.Context(context.WithoutCancel(task.TraceContext())), config.Name, chk, config.Timeout.Value)
 		if !tomb.Alive() {
 			return true, checkStopped(config.Name, task.Kind(), tomb.Err())
 		}
@@ -72,11 +73,11 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 				task.Errorf("%s", errorDetails(err))
 			}
 			task.Set(checkDetailsAttr, &details)
-			m.state.Unlock()
+			m.state.UnlockWithContext(task.TraceContext())
 
 			logger.Noticef("Check %q failure %d/%d: %v", config.Name, details.Failures, config.Threshold, err)
 			if atThreshold {
-				trace.Logf(context.TODO(), "check.threshold", "check=%s failures=%d threshold=%d", config.Name, details.Failures, config.Threshold)
+				trace.Logf(task.TraceContext(), "check.threshold", "check=%s failures=%d threshold=%d", config.Name, details.Failures, config.Threshold)
 				logger.Noticef("Check %q threshold %d hit, triggering action and recovering", config.Name, config.Threshold)
 				m.callFailureHandlers(config.Name)
 				// Returning the error means perform-check goes to Error status
@@ -101,13 +102,13 @@ func (m *CheckManager) doPerformCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 			m.state.Lock()
 			task.Logf("succeeded after %s", pluralise(oldFailures, "failure", "failures"))
 			task.Set(checkDetailsAttr, &details)
-			m.state.Unlock()
+			m.state.UnlockWithContext(task.TraceContext())
 		} else {
 			m.updateCheckData(config, changeID, prevChangeID, details.Successes, details.Failures)
 
 			m.state.Lock()
 			task.Set(checkDetailsAttr, &details)
-			m.state.Unlock()
+			m.state.UnlockWithContext(task.TraceContext())
 		}
 		return false, nil
 	}
@@ -160,7 +161,7 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 	var details checkDetails
 	err := task.Get(checkDetailsAttr, &details)
 	config := m.state.Cached(recoverConfigKey{changeID}).(*plan.Check) // panic if key not present (always should be)
-	m.state.Unlock()
+	m.state.UnlockWithContext(task.TraceContext())
 	if err != nil {
 		return fmt.Errorf("cannot get check details for recover-check task %q: %v", task.ID(), err)
 	}
@@ -178,8 +179,7 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 	chk := newChecker(config)
 
 	recoverCheck := func() (shouldExit bool, err error) {
-		//lint:ignore SA1012 providing a nil context to tomb.Context() is valid
-		err = runCheck(tomb.Context(nil), config.Name, chk, config.Timeout.Value)
+		err = runCheck(tomb.Context(context.WithoutCancel(task.TraceContext())), config.Name, chk, config.Timeout.Value)
 		if !tomb.Alive() {
 			return true, checkStopped(config.Name, task.Kind(), tomb.Err())
 		}
@@ -191,7 +191,7 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 			m.state.Lock()
 			task.Set(checkDetailsAttr, &details)
 			task.Errorf("%s", errorDetails(err))
-			m.state.Unlock()
+			m.state.UnlockWithContext(task.TraceContext())
 
 			logger.Noticef("Check %q failure %d/%d: %v", config.Name, details.Failures, config.Threshold, err)
 			return false, err
@@ -202,10 +202,10 @@ func (m *CheckManager) doRecoverCheck(task *state.Task, tomb *tombpkg.Tomb) erro
 		details.Successes = 1
 		details.Failures = 0
 		details.Proceed = true
-		trace.Logf(context.TODO(), "check.recovery", "check=%s", config.Name)
+		trace.Logf(task.TraceContext(), "check.recovery", "check=%s", config.Name)
 		m.state.Lock()
 		task.Set(checkDetailsAttr, &details)
-		m.state.Unlock()
+		m.state.UnlockWithContext(task.TraceContext())
 		return true, nil
 	}
 

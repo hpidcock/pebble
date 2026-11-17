@@ -16,6 +16,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,14 +58,14 @@ func (s *execSuite) SetUpTest(c *C) {
 	}
 
 	socketPath := c.MkDir() + ".pebble.socket"
-	daemon, err := New(&Options{
+	daemon, err := New(context.Background(), &Options{
 		Dir:        c.MkDir(),
 		SocketPath: socketPath,
 	})
 	c.Assert(err, IsNil)
-	err = daemon.Init()
+	err = daemon.Init(context.Background())
 	c.Assert(err, IsNil)
-	daemon.Start()
+	daemon.Start(context.Background())
 	s.daemon = daemon
 
 	s.client, err = client.New(&client.Config{Socket: socketPath})
@@ -73,7 +74,7 @@ func (s *execSuite) SetUpTest(c *C) {
 
 func (s *execSuite) TearDownTest(c *C) {
 	s.client.CloseIdleConnections()
-	err := s.daemon.Stop(nil)
+	err := s.daemon.Stop(context.Background(), nil)
 	c.Check(err, IsNil)
 
 	err = reaper.Stop()
@@ -208,7 +209,7 @@ func (s *execSuite) TestTimeout(c *C) {
 
 func (s *execSuite) TestContextNoOverrides(c *C) {
 	dir := c.MkDir()
-	err := s.daemon.overlord.PlanManager().AppendLayer(&plan.Layer{
+	err := s.daemon.overlord.PlanManager().AppendLayer(context.Background(), &plan.Layer{
 		Label: "layer1",
 		Services: map[string]*plan.Service{"svc1": {
 			Name:        "svc1",
@@ -230,7 +231,7 @@ func (s *execSuite) TestContextNoOverrides(c *C) {
 }
 
 func (s *execSuite) TestContextOverrides(c *C) {
-	err := s.daemon.overlord.PlanManager().AppendLayer(&plan.Layer{
+	err := s.daemon.overlord.PlanManager().AppendLayer(context.Background(), &plan.Layer{
 		Label: "layer1",
 		Services: map[string]*plan.Service{"svc1": {
 			Name:        "svc1",
@@ -348,7 +349,7 @@ func (s *execSuite) TestStopWhileExecRunning(c *C) {
 	time.Sleep(50 * time.Millisecond)
 
 	start := time.Now()
-	err = s.daemon.Stop(nil)
+	err = s.daemon.Stop(context.Background(), nil)
 	elapsed := time.Since(start)
 	c.Check(err, IsNil)
 	c.Check(elapsed < 500*time.Millisecond, Equals, true,

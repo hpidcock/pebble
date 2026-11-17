@@ -16,6 +16,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
@@ -33,14 +34,14 @@ import (
 func (s *daemonSuite) TestHTTPSOpenAccess(c *C) {
 	s.httpsAddress = ":0" // Go will choose port (use listener.Addr() to find it)
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	cleanupServer := true
 	defer func() {
 		// If we exit early (test failure), clean up.
 		if cleanupServer {
-			d.Stop(nil)
+			d.Stop(context.Background(), nil)
 		}
 	}()
 
@@ -77,7 +78,7 @@ func (s *daemonSuite) TestHTTPSOpenAccess(c *C) {
 		},
 	})
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Daemon already stopped, no need to do it again during defer.
@@ -90,14 +91,14 @@ func (s *daemonSuite) TestHTTPSOpenAccess(c *C) {
 func (s *daemonSuite) TestHTTPSUserAccessFail(c *C) {
 	s.httpsAddress = ":0" // Go will choose port (use listener.Addr() to find it)
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	cleanupServer := true
 	defer func() {
 		// If we exit early (test failure), clean up.
 		if cleanupServer {
-			d.Stop(nil)
+			d.Stop(context.Background(), nil)
 		}
 	}()
 
@@ -125,7 +126,7 @@ func (s *daemonSuite) TestHTTPSUserAccessFail(c *C) {
 	// Access fails because the TLS client identity is not known.
 	c.Assert(response.StatusCode, Equals, http.StatusUnauthorized)
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Daemon already stopped, no need to do it again during defer.
@@ -146,14 +147,14 @@ pairing:
 	writeTestLayer(s.pebbleDir, pairingLayer)
 
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	cleanupServer := true
 	defer func() {
 		// If we exit early (test failure), clean up.
 		if cleanupServer {
-			d.Stop(nil)
+			d.Stop(context.Background(), nil)
 		}
 	}()
 
@@ -196,7 +197,7 @@ pairing:
 	// Access succeeds because the TLS client identity is now paired
 	c.Assert(response.StatusCode, Equals, http.StatusOK)
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Daemon already stopped, no need to do it again during defer.

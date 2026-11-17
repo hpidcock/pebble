@@ -137,8 +137,8 @@ type Overlord struct {
 }
 
 // New creates an Overlord with all its state managers.
-func New(opts *Options) (*Overlord, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.overlord.new").End()
+func New(ctx context.Context, opts *Options) (*Overlord, error) {
+	defer trace.StartRegion(ctx, "pebble.overlord.new").End()
 
 	o := &Overlord{
 		pebbleDir:   opts.PebbleDir,
@@ -170,7 +170,7 @@ func New(opts *Options) (*Overlord, error) {
 			path:         statePath,
 			ensureBefore: o.ensureBefore,
 		}
-		s, restartMgr, err = loadState(curBootID, statePath, opts.RestartHandler, backend)
+		s, restartMgr, err = loadState(ctx, curBootID, statePath, opts.RestartHandler, backend)
 		if err != nil {
 			return nil, err
 		}
@@ -179,7 +179,7 @@ func New(opts *Options) (*Overlord, error) {
 		backend := &inMemoryBackend{
 			ensureBefore: o.ensureBefore,
 		}
-		s, restartMgr, err = setupState(curBootID, opts.RestartHandler, backend)
+		s, restartMgr, err = setupState(ctx, curBootID, opts.RestartHandler, backend)
 		if err != nil {
 			return nil, err
 		}
@@ -282,12 +282,12 @@ func New(opts *Options) (*Overlord, error) {
 	// Load the plan from the Pebble layers directory (which may be missing
 	// or have no layers, resulting in an empty plan), and propagate PlanChanged
 	// notifications to all notification subscribers.
-	err = o.planMgr.Load(nil)
+	err = o.planMgr.Load(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load plan: %w", err)
 	}
 
-	o.loopTomb.Go(o.loop)
+	o.loopTomb.Go(func() error { return o.loop(ctx) })
 	return o, nil
 }
 
@@ -315,7 +315,7 @@ func getCurrentBootID() (string, error) {
 	return curBootID, nil
 }
 
-func loadState(curBootID, statePath string, restartHandler restart.Handler, backend state.Backend) (*state.State, *restart.RestartManager, error) {
+func loadState(ctx context.Context, curBootID, statePath string, restartHandler restart.Handler, backend state.Backend) (*state.State, *restart.RestartManager, error) {
 	timings := timing.Start("", "", map[string]string{"startup": "load-state"})
 
 	if !osutil.FileExists(statePath) {
@@ -325,11 +325,11 @@ func loadState(curBootID, statePath string, restartHandler restart.Handler, back
 			return nil, nil, fmt.Errorf("fatal: directory %q must be present", stateDir)
 		}
 		s := state.New(backend)
-		restartMgr, err := initRestart(s, curBootID, restartHandler)
+		restartMgr, err := initRestart(ctx, s, curBootID, restartHandler)
 		if err != nil {
 			return nil, nil, err
 		}
-		patch.Init(s)
+		patch.Init(ctx, s)
 		return s, restartMgr, nil
 	}
 	r, err := os.Open(statePath)
@@ -340,7 +340,7 @@ func loadState(curBootID, statePath string, restartHandler restart.Handler, back
 
 	var s *state.State
 	span := timings.StartNested("read-state", "read state from disk")
-	s, err = state.ReadState(backend, r)
+	s, err = state.ReadState(ctx, backend, r)
 	span.Stop()
 	if err != nil {
 		return nil, nil, err
@@ -352,45 +352,45 @@ func loadState(curBootID, statePath string, restartHandler restart.Handler, back
 	//perfTimings.Save(s)
 	//s.Unlock()
 
-	restartMgr, err := initRestart(s, curBootID, restartHandler)
+	restartMgr, err := initRestart(ctx, s, curBootID, restartHandler)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// one-shot migrations
-	err = patch.Apply(s)
+	err = patch.Apply(ctx, s)
 	if err != nil {
 		return nil, nil, err
 	}
 	return s, restartMgr, nil
 }
 
-func setupState(curBootID string, restartHandler restart.Handler, backend state.Backend) (*state.State, *restart.RestartManager, error) {
+func setupState(ctx context.Context, curBootID string, restartHandler restart.Handler, backend state.Backend) (*state.State, *restart.RestartManager, error) {
 	// Create a new state for in-memory backend.
 	s := state.New(backend)
-	patch.Init(s)
+	patch.Init(ctx, s)
 
-	restartMgr, err := initRestart(s, curBootID, restartHandler)
+	restartMgr, err := initRestart(ctx, s, curBootID, restartHandler)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// one-shot migrations
-	err = patch.Apply(s)
+	err = patch.Apply(ctx, s)
 	if err != nil {
 		return nil, nil, err
 	}
 	return s, restartMgr, nil
 }
 
-func initRestart(s *state.State, curBootID string, restartHandler restart.Handler) (*restart.RestartManager, error) {
+func initRestart(ctx context.Context, s *state.State, curBootID string, restartHandler restart.Handler) (*restart.RestartManager, error) {
 	s.Lock()
-	defer s.Unlock()
+	defer s.UnlockWithContext(ctx)
 	return restart.Manager(s, curBootID, restartHandler)
 }
 
-func (o *Overlord) StartUp() error {
-	defer trace.StartRegion(context.TODO(), "pebble.overlord.startup").End()
+func (o *Overlord) StartUp(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.overlord.startup").End()
 	if o.startedUp {
 		return nil
 	}
@@ -400,11 +400,11 @@ func (o *Overlord) StartUp() error {
 	st := o.State()
 	st.Lock()
 	o.startOfOperationTime, err = o.StartOfOperationTime()
-	st.Unlock()
+	st.UnlockWithContext(ctx)
 	if err != nil {
 		return fmt.Errorf("cannot get start of operation time: %s", err)
 	}
-	return o.stateEng.StartUp()
+	return o.stateEng.StartUp(ctx)
 }
 
 func (o *Overlord) ensureTimerSetup() {
@@ -483,7 +483,7 @@ func (o *Overlord) Loop() {
 	close(o.loopProceed)
 }
 
-func (o *Overlord) loop() error {
+func (o *Overlord) loop(ctx context.Context) error {
 	select {
 	case <-o.loopProceed:
 		// Proceed with the loop.
@@ -491,11 +491,10 @@ func (o *Overlord) loop() error {
 		return nil
 	}
 	for {
-		// TODO: pass a proper context into Ensure
 		o.ensureTimerReset()
 		// in case of errors engine logs them,
 		// continue to the next Ensure() try for now
-		o.stateEng.Ensure()
+		o.stateEng.Ensure(ctx)
 		o.ensureDidRun()
 		pruneC := pruneTickerC(o.pruneTicker)
 		select {
@@ -503,11 +502,11 @@ func (o *Overlord) loop() error {
 			return nil
 		case <-o.ensureTimer.C:
 		case <-pruneC:
-			region := trace.StartRegion(context.TODO(), "pebble.overlord.prune")
+			region := trace.StartRegion(ctx, "pebble.overlord.prune")
 			st := o.State()
 			st.Lock()
-			st.Prune(o.startOfOperationTime, pruneWait, abortWait, pruneMaxChanges, pruneMaxNotices)
-			st.Unlock()
+			st.Prune(ctx, o.startOfOperationTime, pruneWait, abortWait, pruneMaxChanges, pruneMaxNotices)
+			st.UnlockWithContext(ctx)
 			serviceMgr := o.ServiceManager()
 			serviceMgr.Prune(pruneWait, pruneMaxInactiveServices)
 			region.End()
@@ -525,16 +524,16 @@ func (o *Overlord) CanStandby() bool {
 }
 
 // Stop stops the ensure loop and the managers under the StateEngine.
-func (o *Overlord) Stop() error {
-	defer trace.StartRegion(context.TODO(), "pebble.overlord.stop").End()
+func (o *Overlord) Stop(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.overlord.stop").End()
 	o.loopTomb.Kill(nil)
 	err := o.loopTomb.Wait()
-	o.stateEng.Stop()
+	o.stateEng.Stop(ctx)
 	return err
 }
 
-func (o *Overlord) settle(timeout time.Duration, beforeCleanups func()) error {
-	if err := o.StartUp(); err != nil {
+func (o *Overlord) settle(ctx context.Context, timeout time.Duration, beforeCleanups func()) error {
+	if err := o.StartUp(ctx); err != nil {
 		return err
 	}
 
@@ -566,7 +565,7 @@ func (o *Overlord) settle(timeout time.Duration, beforeCleanups func()) error {
 			return err
 		}
 		next := o.ensureTimerReset()
-		err := o.stateEng.Ensure()
+		err := o.stateEng.Ensure(ctx)
 		switch ee := err.(type) {
 		case nil:
 		case *ensureError:
@@ -574,7 +573,7 @@ func (o *Overlord) settle(timeout time.Duration, beforeCleanups func()) error {
 		default:
 			errs = append(errs, err)
 		}
-		o.stateEng.Wait()
+		o.stateEng.Wait(ctx)
 		o.ensureLock.Lock()
 		done = o.ensureNext.Equal(next)
 		o.ensureLock.Unlock()
@@ -592,7 +591,7 @@ func (o *Overlord) settle(timeout time.Duration, beforeCleanups func()) error {
 					break
 				}
 			}
-			st.Unlock()
+			st.UnlockWithContext(ctx)
 		}
 	}
 	if len(errs) != 0 {
@@ -609,7 +608,7 @@ func (o *Overlord) settle(timeout time.Duration, beforeCleanups func()) error {
 // conjunction with Loop. If timeout is non-zero and settling takes
 // longer than timeout, returns an error. Calls StartUp as well.
 func (o *Overlord) Settle(timeout time.Duration) error {
-	return o.settle(timeout, nil)
+	return o.settle(context.Background(), timeout, nil)
 }
 
 // SettleObserveBeforeCleanups runs first a state engine Ensure and
@@ -621,7 +620,7 @@ func (o *Overlord) Settle(timeout time.Duration) error {
 // conjunction with Loop. If timeout is non-zero and settling takes
 // longer than timeout, returns an error. Calls StartUp as well.
 func (o *Overlord) SettleObserveBeforeCleanups(timeout time.Duration, beforeCleanups func()) error {
-	return o.settle(timeout, beforeCleanups)
+	return o.settle(context.Background(), timeout, beforeCleanups)
 }
 
 // State returns the system state managed by the overlord.
@@ -701,7 +700,7 @@ func FakeWithState(handleRestart func(restart.RestartType)) *Overlord {
 		loopProceed: make(chan struct{}),
 	}
 	// create the loop goroutine
-	o.loopTomb.Go(o.loop)
+	o.loopTomb.Go(func() error { return o.loop(context.Background()) })
 
 	s := state.New(fakeBackend{o: o})
 	o.stateEng = NewStateEngine(s)
@@ -739,7 +738,7 @@ type fakeBackend struct {
 	o *Overlord
 }
 
-func (mb fakeBackend) Checkpoint(data []byte) error {
+func (mb fakeBackend) Checkpoint(ctx context.Context, data []byte) error {
 	return nil
 }
 

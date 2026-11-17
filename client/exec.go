@@ -113,6 +113,8 @@ type ExecProcess struct {
 // Exec starts a command with the given options, returning a value
 // representing the process.
 func (client *Client) Exec(opts *ExecOptions) (*ExecProcess, error) {
+	ctx := context.Background()
+
 	// Set up stdin/stdout defaults.
 	stdin := opts.Stdin
 	if stdin == nil {
@@ -150,7 +152,7 @@ func (client *Client) Exec(opts *ExecOptions) (*ExecProcess, error) {
 		return nil, fmt.Errorf("cannot encode JSON payload: %w", err)
 	}
 	var result execResult
-	resp, err := client.Requester().Do(context.Background(), &RequestOptions{
+	resp, err := client.Requester().Do(ctx, &RequestOptions{
 		Type:   AsyncRequest,
 		Method: "POST",
 		Path:   "/v1/exec",
@@ -166,13 +168,13 @@ func (client *Client) Exec(opts *ExecOptions) (*ExecProcess, error) {
 
 	// Connect to the "control" websocket.
 	taskID := result.TaskID
-	controlConn, err := client.getTaskWebsocket(taskID, "control")
+	controlConn, err := client.getTaskWebsocket(ctx, taskID, "control")
 	if err != nil {
 		return nil, err
 	}
 
 	// Forward stdin and stdout.
-	ioConn, err := client.getTaskWebsocket(taskID, "stdio")
+	ioConn, err := client.getTaskWebsocket(ctx, taskID, "stdio")
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +185,7 @@ func (client *Client) Exec(opts *ExecOptions) (*ExecProcess, error) {
 	var stderrConn clientWebsocket
 	var stderrDone chan bool
 	if opts.Stderr != nil {
-		stderrConn, err = client.getTaskWebsocket(taskID, "stderr")
+		stderrConn, err = client.getTaskWebsocket(ctx, taskID, "stderr")
 		if err != nil {
 			return nil, err
 		}

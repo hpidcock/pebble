@@ -29,7 +29,7 @@ func v1GetTaskWebsocket(c *Command, req *http.Request, _ *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(req.Context())
 
 	task := st.Task(taskID)
 	if task == nil {

@@ -15,6 +15,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"runtime/trace"
@@ -62,6 +63,16 @@ type Task struct {
 	undoingTime time.Duration
 
 	atTime time.Time
+
+	traceCtx context.Context
+}
+
+// TraceContext returns the context associated with the task's execution trace.
+func (t *Task) TraceContext() context.Context {
+	if t.traceCtx != nil {
+		return t.traceCtx
+	}
+	return context.Background()
 }
 
 func newTask(state *State, id, kind, summary string) *Task {

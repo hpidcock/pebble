@@ -77,9 +77,9 @@ func New(st *state.State) *StandbyOpinions {
 	}
 }
 
-func (m *StandbyOpinions) Start() {
+func (m *StandbyOpinions) Start(ctx context.Context) {
 	go func() {
-		ctx, end := trace.NewTask(context.TODO(), "pebble.standby")
+		ctx, end := trace.NewTask(ctx, "pebble.standby")
 		defer end.End()
 		wait := standbyWait
 		timer := time.NewTimer(wait)
@@ -88,7 +88,7 @@ func (m *StandbyOpinions) Start() {
 				trace.Logf(ctx, "standby", "ready=true")
 				m.state.Lock()
 				restart.Request(m.state, restart.RestartSocket)
-				m.state.Unlock()
+				m.state.UnlockWithContext(ctx)
 			}
 			select {
 			case <-timer.C:
@@ -104,8 +104,8 @@ func (m *StandbyOpinions) Start() {
 	}()
 }
 
-func (m *StandbyOpinions) Stop() {
-	defer trace.StartRegion(context.TODO(), "pebble.standby.stop").End()
+func (m *StandbyOpinions) Stop(ctx context.Context) {
+	defer trace.StartRegion(ctx, "pebble.standby.stop").End()
 	select {
 	case <-m.stoppedCh:
 		// nothing left to do

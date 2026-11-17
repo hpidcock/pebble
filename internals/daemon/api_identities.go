@@ -112,7 +112,7 @@ func identityFromAPI(ai *apiIdentity, name string) (*identities.Identity, error)
 func v1GetIdentities(c *Command, r *http.Request, _ *UserState) Response {
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 
 	identitiesMgr := c.d.overlord.IdentitiesManager()
 	idents := identitiesMgr.Identities()
@@ -145,7 +145,7 @@ func v1PostIdentities(c *Command, r *http.Request, user *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 
 	identitiesMgr := c.d.overlord.IdentitiesManager()
 

@@ -16,6 +16,7 @@ package patch_test
 
 import (
 	"bytes"
+	"context"
 
 	. "gopkg.in/check.v1"
 
@@ -51,9 +52,9 @@ func (s *patch2Suite) TestLegacyIdentities(c *C) {
     }
 }`)
 
-	st, err := state.ReadState(nil, bytes.NewReader(data))
+	st, err := state.ReadState(context.Background(), nil, bytes.NewReader(data))
 	c.Assert(err, IsNil)
-	err = patch.Apply(st)
+	err = patch.Apply(context.Background(), st)
 	c.Assert(err, IsNil)
 	mgr, err := identities.NewManager(st)
 	c.Assert(err, IsNil)
@@ -113,9 +114,9 @@ func (s *patch2Suite) TestNewAndLegacyIdentities(c *C) {
     }
 }`)
 
-	st, err := state.ReadState(nil, bytes.NewReader(data))
+	st, err := state.ReadState(context.Background(), nil, bytes.NewReader(data))
 	c.Assert(err, IsNil)
-	err = patch.Apply(st)
+	err = patch.Apply(context.Background(), st)
 	c.Assert(err, IsNil)
 	mgr, err := identities.NewManager(st)
 	c.Assert(err, IsNil)

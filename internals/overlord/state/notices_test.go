@@ -441,7 +441,7 @@ func (s *noticesSuite) TestCheckpoint(c *C) {
 	st.Unlock()
 	c.Assert(backend.checkpoints, HasLen, 1)
 
-	st2, err := state.ReadState(nil, bytes.NewReader(backend.checkpoints[0]))
+	st2, err := state.ReadState(context.Background(), nil, bytes.NewReader(backend.checkpoints[0]))
 	c.Assert(err, IsNil)
 	st2.Lock()
 	defer st2.Unlock()
@@ -464,14 +464,14 @@ func (s *noticesSuite) TestPruneNoticesCheckpoint(c *C) {
 	st.Unlock()
 	c.Assert(backend.checkpoints, HasLen, 1)
 
-	st, err := state.ReadState(backend, bytes.NewReader(backend.checkpoints[0]))
+	st, err := state.ReadState(context.Background(), backend, bytes.NewReader(backend.checkpoints[0]))
 	c.Assert(err, IsNil)
 	st.Lock()
-	st.Prune(time.Now(), 0, 0, 0, 1)
+	st.Prune(context.Background(), time.Now(), 0, 0, 0, 1)
 	st.Unlock()
 	c.Assert(backend.checkpoints, HasLen, 2)
 
-	st, err = state.ReadState(nil, bytes.NewReader(backend.checkpoints[1]))
+	st, err = state.ReadState(context.Background(), nil, bytes.NewReader(backend.checkpoints[1]))
 	c.Assert(err, IsNil)
 	st.Lock()
 	defer st.Unlock()
@@ -531,7 +531,7 @@ func (s *noticesSuite) TestDeleteExpired(c *C) {
 	c.Check(st.NumNotices(), Equals, 8)
 	c.Check(st.LatestWarningTime().Equal(old), Equals, true)
 	// Prune everything that has expired by now
-	st.Prune(now, 0, 0, 0, 100)
+	st.Prune(context.Background(), now, 0, 0, 0, 100)
 	c.Check(st.NumNotices(), Equals, 5)
 	c.Check(st.LatestWarningTime().IsZero(), Equals, true)
 
@@ -550,7 +550,7 @@ func (s *noticesSuite) TestDeleteExpired(c *C) {
 
 	// Now we force the prune to be count based, and it should prefer to remove six and six-later
 	// five, almost-now, and now all have occurred more recently
-	st.Prune(now, 0, 0, 0, 3)
+	st.Prune(context.Background(), now, 0, 0, 0, 3)
 	notices = st.Notices(nil)
 	c.Assert(notices, HasLen, 3)
 	n = noticeToMap(c, notices[0])
@@ -623,7 +623,7 @@ func (s *noticesSuite) TestReadStateWaitNotices(c *C) {
 	marshalled, err := st.MarshalJSON()
 	c.Assert(err, IsNil)
 
-	st2, err := state.ReadState(nil, bytes.NewBuffer(marshalled))
+	st2, err := state.ReadState(context.Background(), nil, bytes.NewBuffer(marshalled))
 	c.Assert(err, IsNil)
 	st2.Lock()
 	defer st2.Unlock()

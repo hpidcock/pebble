@@ -702,8 +702,8 @@ func (e *FormatError) Error() string {
 // Neither the individual layers nor the combined layer are validated here - the
 // caller should have validated the individual layers prior to calling, and
 // validate the combined output if required.
-func CombineLayers(layers ...*Layer) (*Layer, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.plan.combine").End()
+func CombineLayers(ctx context.Context, layers ...*Layer) (*Layer, error) {
+	defer trace.StartRegion(ctx, "pebble.plan.combine").End()
 	combined := &Layer{
 		Services:   make(map[string]*Service),
 		Checks:     make(map[string]*Check),
@@ -1050,8 +1050,8 @@ func (layer *Layer) Validate() error {
 
 // Validate checks that the combined layers form a valid plan. See also
 // Layer.Validate, which checks that the individual layers are valid.
-func (p *Plan) Validate() error {
-	defer trace.StartRegion(context.TODO(), "pebble.plan.validate").End()
+func (p *Plan) Validate(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.plan.validate").End()
 	for name, service := range p.Services {
 		if service.Command == "" {
 			return &FormatError{
@@ -1325,8 +1325,8 @@ func (p *Plan) checkCycles() error {
 	return err
 }
 
-func ParseLayer(order int, label string, data []byte) (*Layer, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.plan.parse").End()
+func ParseLayer(ctx context.Context, order int, label string, data []byte) (*Layer, error) {
+	defer trace.StartRegion(ctx, "pebble.plan.parse").End()
 	layer := &Layer{
 		Services:   make(map[string]*Service),
 		Checks:     make(map[string]*Check),
@@ -1447,7 +1447,7 @@ func validServiceAction(action ServiceAction, additionalValid ...ServiceAction) 
 //	| 002-bar.d/001-aaa.yaml     | 002-001 => 2001 | bar/aaa |
 //	| 002-bar.d/002-bbb.yaml     | 002-002 => 2002 | bar/bbb |
 //	| 003-baz.yaml               | 003-000 => 3000 | baz     |
-func ReadLayersDir(layersDir string) ([]*Layer, error) {
+func ReadLayersDir(ctx context.Context, layersDir string) ([]*Layer, error) {
 	var layers []*Layer
 
 	// Read the first-level directory
@@ -1474,7 +1474,7 @@ func ReadLayersDir(layersDir string) ([]*Layer, error) {
 
 			// Add the config files from the second level
 			for _, l2Entry := range l2Entries {
-				layer, err := loadConfigLayer(layersDir, l1Entry, l2Entry)
+				layer, err := loadConfigLayer(ctx, layersDir, l1Entry, l2Entry)
 				if err != nil {
 					return nil, err
 				}
@@ -1482,7 +1482,7 @@ func ReadLayersDir(layersDir string) ([]*Layer, error) {
 			}
 		} else {
 			// Add the config files from the first level
-			layer, err := loadConfigLayer(layersDir, l1Entry, nil)
+			layer, err := loadConfigLayer(ctx, layersDir, l1Entry, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -1498,7 +1498,7 @@ func ReadLayersDir(layersDir string) ([]*Layer, error) {
 // root directory, in which case l2Entry must be nil. If the file is
 // inside a sub-directory, l1Entry must supply information on the directory,
 // while l2Entry information on the file name itself.
-func loadConfigLayer(layersDir string, l1Entry *configEntry, l2Entry *configEntry) (*Layer, error) {
+func loadConfigLayer(ctx context.Context, layersDir string, l1Entry *configEntry, l2Entry *configEntry) (*Layer, error) {
 	// Resolve the order and label, which may include additional
 	// information from an optional sub-directory prefix.
 	label := l1Entry.label
@@ -1517,7 +1517,7 @@ func loadConfigLayer(layersDir string, l1Entry *configEntry, l2Entry *configEntr
 		return nil, fmt.Errorf("cannot read layer file: %v", err)
 	}
 
-	layer, err := ParseLayer(order, label, data)
+	layer, err := ParseLayer(ctx, order, label, data)
 	if err != nil {
 		return nil, err
 	}
@@ -1614,8 +1614,8 @@ func configLayerEntries(configDir string, dirOK bool) (configs []*configEntry, e
 // exist, it returns a valid Plan with no layers.
 // If base is not nil, layers read from the given layersDir
 // will be stacked on top of the given base plan.
-func ReadDir(layersDir string, base *Plan) (*Plan, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.plan.read").End()
+func ReadDir(ctx context.Context, layersDir string, base *Plan) (*Plan, error) {
+	defer trace.StartRegion(ctx, "pebble.plan.read").End()
 	var layers []*Layer
 
 	_, err := os.Stat(layersDir)
@@ -1625,7 +1625,7 @@ func ReadDir(layersDir string, base *Plan) (*Plan, error) {
 		}
 		// layersDir does not exist, but a base plan might have been supplied.
 	} else {
-		layers, err = ReadLayersDir(layersDir)
+		layers, err = ReadLayersDir(ctx, layersDir)
 		if err != nil {
 			return nil, err
 		}
@@ -1653,7 +1653,7 @@ func ReadDir(layersDir string, base *Plan) (*Plan, error) {
 		layers = append([]*Layer{baseLayer}, layers...)
 	}
 
-	combined, err := CombineLayers(layers...)
+	combined, err := CombineLayers(ctx, layers...)
 	if err != nil {
 		return nil, err
 	}
@@ -1664,7 +1664,7 @@ func ReadDir(layersDir string, base *Plan) (*Plan, error) {
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	err = plan.Validate()
+	err = plan.Validate(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@
 package state_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,7 +57,7 @@ func (cs *changeSuite) TestNewChangeWithExtraNoticeData(c *C) {
 	st.Lock()
 	defer st.Unlock()
 
-	st.NewChangeWithNoticeData("perform-check", "...", map[string]string{"check-name": "c"})
+	st.NewChangeWithNoticeData(context.Background(), "perform-check", "...", map[string]string{"check-name": "c"})
 
 	notices := st.Notices(nil)
 	c.Assert(notices, HasLen, 1)

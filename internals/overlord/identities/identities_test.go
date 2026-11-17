@@ -16,6 +16,7 @@ package identities_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -137,7 +138,7 @@ func (s *identitiesSuite) TestUnmarshalState(c *C) {
 	}
 }`)
 
-	st, err := state.ReadState(nil, bytes.NewReader(data))
+	st, err := state.ReadState(context.Background(), nil, bytes.NewReader(data))
 	c.Assert(err, IsNil)
 	mgr, err := identities.NewManager(st)
 	c.Assert(err, IsNil)

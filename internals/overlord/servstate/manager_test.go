@@ -16,6 +16,7 @@ package servstate_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -329,7 +330,7 @@ services:
 	chgStart := s.st.NewChange("test", "Start test")
 	chgStart.AddAll(ts)
 	s.st.Unlock()
-	s.runner.Ensure()
+	s.runner.Ensure(context.Background())
 
 	// Wait until the service is in the starting state.
 	s.waitUntilService(c, serviceName, func(service *servstate.ServiceInfo) bool {
@@ -1013,7 +1014,7 @@ func (s *S) TestOnCheckFailureRestartWhileRunning(c *C) {
 
 	// Create check manager and tell it about plan updates
 	checkMgr := checkstate.NewManager(s.st, s.runner, nil)
-	defer checkMgr.PlanChanged(plan.NewPlan())
+	defer checkMgr.PlanChanged(context.Background(), plan.NewPlan())
 
 	// Tell service manager about check failures
 	checkFailed := make(chan struct{})
@@ -1051,7 +1052,7 @@ checks:
 		tempFile,
 	))
 	s.planChanged(c)
-	checkMgr.PlanChanged(s.plan)
+	checkMgr.PlanChanged(context.Background(), s.plan)
 
 	// Start service and wait till it starts up
 	s.startServices(c, [][]string{{"test2"}})
@@ -1108,7 +1109,7 @@ func (s *S) TestOnCheckFailureRestartDuringBackoff(c *C) {
 
 	// Create check manager and tell it about plan updates
 	checkMgr := checkstate.NewManager(s.st, s.runner, nil)
-	defer checkMgr.PlanChanged(plan.NewPlan())
+	defer checkMgr.PlanChanged(context.Background(), plan.NewPlan())
 
 	// Tell service manager about check failures
 	checkFailed := make(chan struct{})
@@ -1147,7 +1148,7 @@ checks:
 		tempFile,
 	))
 	s.planChanged(c)
-	checkMgr.PlanChanged(s.plan)
+	checkMgr.PlanChanged(context.Background(), s.plan)
 
 	// Start service and wait till it starts up
 	s.startServices(c, [][]string{{"test2"}})
@@ -1200,7 +1201,7 @@ func (s *S) TestOnCheckFailureIgnore(c *C) {
 
 	// Create check manager and tell it about plan updates
 	checkMgr := checkstate.NewManager(s.st, s.runner, nil)
-	defer checkMgr.PlanChanged(plan.NewPlan())
+	defer checkMgr.PlanChanged(context.Background(), plan.NewPlan())
 
 	// Tell service manager about check failures
 	checkFailed := make(chan struct{})
@@ -1237,7 +1238,7 @@ checks:
 		tempFile,
 	))
 	s.planChanged(c)
-	checkMgr.PlanChanged(s.plan)
+	checkMgr.PlanChanged(context.Background(), s.plan)
 
 	// Start service and wait till it starts up (output file is written to)
 	s.startServices(c, [][]string{{"test2"}})
@@ -1285,7 +1286,7 @@ func (s *S) testOnCheckFailureShutdown(c *C, action string, restartType restart.
 
 	// Create check manager and tell it about plan updates
 	checkMgr := checkstate.NewManager(s.st, s.runner, nil)
-	defer checkMgr.PlanChanged(plan.NewPlan())
+	defer checkMgr.PlanChanged(context.Background(), plan.NewPlan())
 
 	// Tell service manager about check failures
 	checkFailed := make(chan struct{})
@@ -1322,7 +1323,7 @@ checks:
 		action,
 	))
 	s.planChanged(c)
-	checkMgr.PlanChanged(s.plan)
+	checkMgr.PlanChanged(context.Background(), s.plan)
 
 	// Start service and wait till it starts up (output file is written to)
 	s.startServices(c, [][]string{{"test2"}})
@@ -1739,7 +1740,7 @@ func (s *S) TestStopRunning(c *C) {
 	})
 
 	// Create and execute a change for stopping the running services.
-	taskSet, err := servstate.StopRunning(s.st, s.manager)
+	taskSet, err := servstate.StopRunning(context.Background(), s.st, s.manager)
 	c.Assert(err, IsNil)
 	s.st.Lock()
 	change := s.st.NewChange("stop", "Stop all running services")
@@ -1768,7 +1769,7 @@ func (s *S) TestStopRunningNoServices(c *C) {
 	s.planAddLayer(c, testPlanLayer)
 	s.planChanged(c)
 
-	taskSet, err := servstate.StopRunning(s.st, s.manager)
+	taskSet, err := servstate.StopRunning(context.Background(), s.st, s.manager)
 	c.Assert(err, IsNil)
 	c.Assert(taskSet, IsNil)
 }
@@ -1976,14 +1977,14 @@ workloads:
 
 func (s *S) tryPlanAddLayer(c *C, layerYAML string) error {
 	cnt := len(s.plan.Layers)
-	layer, err := plan.ParseLayer(cnt, fmt.Sprintf("test-plan-layer-%v", cnt), []byte(layerYAML))
+	layer, err := plan.ParseLayer(context.Background(), cnt, fmt.Sprintf("test-plan-layer-%v", cnt), []byte(layerYAML))
 	if err != nil {
 		return err
 	}
 	// Resolve {{.NotifyDoneCheck}}
 	s.insertDoneChecks(c, layer)
 	layers := append(s.plan.Layers, layer)
-	combined, err := plan.CombineLayers(layers...)
+	combined, err := plan.CombineLayers(context.Background(), layers...)
 	if err != nil {
 		return err
 	}
@@ -1997,7 +1998,7 @@ func (s *S) tryPlanAddLayer(c *C, layerYAML string) error {
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	return s.plan.Validate()
+	return s.plan.Validate(context.Background())
 }
 
 func (s *S) newServiceManager(c *C) {
@@ -2008,18 +2009,18 @@ func (s *S) newServiceManager(c *C) {
 
 func (s *S) planChanged(c *C) {
 	c.Assert(s.plan, NotNil)
-	s.manager.PlanChanged(s.plan)
+	s.manager.PlanChanged(context.Background(), s.plan)
 	s.planPropagated = true
 }
 
 func (s *S) planAddLayer(c *C, layerYAML string) {
 	cnt := len(s.plan.Layers)
-	layer, err := plan.ParseLayer(cnt, fmt.Sprintf("test-plan-layer-%v", cnt), []byte(layerYAML))
+	layer, err := plan.ParseLayer(context.Background(), cnt, fmt.Sprintf("test-plan-layer-%v", cnt), []byte(layerYAML))
 	c.Assert(err, IsNil)
 	// Resolve {{.NotifyDoneCheck}}
 	s.insertDoneChecks(c, layer)
 	layers := append(s.plan.Layers, layer)
-	combined, err := plan.CombineLayers(layers...)
+	combined, err := plan.CombineLayers(context.Background(), layers...)
 	c.Assert(err, IsNil)
 	c.Assert(combined.Validate(), IsNil)
 	s.plan = &plan.Plan{
@@ -2029,12 +2030,12 @@ func (s *S) planAddLayer(c *C, layerYAML string) {
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	c.Assert(s.plan.Validate(), IsNil)
+	c.Assert(s.plan.Validate(context.Background()), IsNil)
 }
 
 // Make sure services are all stopped before the next test starts.
 func (s *S) stopRunningServices(c *C) {
-	taskSet, err := servstate.StopRunning(s.st, s.manager)
+	taskSet, err := servstate.StopRunning(context.Background(), s.st, s.manager)
 	c.Assert(err, IsNil)
 
 	if taskSet == nil {
@@ -2055,7 +2056,7 @@ func (s *S) stopRunningServices(c *C) {
 func waitChangeReady(c *C, runner *state.TaskRunner, change *state.Change, message string) {
 	timeout := time.After(10 * time.Second)
 	for {
-		runner.Ensure()
+		runner.Ensure(context.Background())
 		select {
 		case <-change.Ready():
 			return

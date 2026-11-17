@@ -43,9 +43,9 @@ type PatchFunc func(s *state.State) error
 var patches = make(map[int][]PatchFunc)
 
 // Init initializes an empty state to the current implemented patch level.
-func Init(s *state.State) {
+func Init(ctx context.Context, s *state.State) {
 	s.Lock()
-	defer s.Unlock()
+	defer s.UnlockWithContext(ctx)
 	if err := s.Get("patch-level", new(int)); !errors.Is(err, state.ErrNoState) {
 		panic("internal error: expected empty state, attempting to override patch-level without actual patching")
 	}
@@ -59,12 +59,12 @@ func Init(s *state.State) {
 
 // applySublevelPatches applies all sublevel patches for given level, starting
 // from firstSublevel index.
-func applySublevelPatches(level, firstSublevel int, s *state.State) error {
+func applySublevelPatches(ctx context.Context, level, firstSublevel int, s *state.State) error {
 	for sublevel := firstSublevel; sublevel < len(patches[level]); sublevel++ {
 		if sublevel > 0 {
 			logger.Noticef("Patching system state level %d to sublevel %d...", level, sublevel)
 		}
-		err := applyOne(patches[level][sublevel], s, level, sublevel)
+		err := applyOne(ctx, patches[level][sublevel], s, level, sublevel)
 		if err != nil {
 			logger.Noticef("Cannot patch: %v", err)
 			return fmt.Errorf("cannot patch system state to level %d, sublevel %d: %v", level, sublevel, err)
@@ -75,15 +75,15 @@ func applySublevelPatches(level, firstSublevel int, s *state.State) error {
 
 // Apply applies any necessary patches to update the provided state to
 // conventions required by the current patch level of the system.
-func Apply(s *state.State) error {
-	defer trace.StartRegion(context.TODO(), "pebble.state.patch").End()
+func Apply(ctx context.Context, s *state.State) error {
+	defer trace.StartRegion(ctx, "pebble.state.patch").End()
 	var stateLevel, stateSublevel int
 	s.Lock()
 	err := s.Get("patch-level", &stateLevel)
 	if err == nil || errors.Is(err, state.ErrNoState) {
 		err = s.Get("patch-sublevel", &stateSublevel)
 	}
-	s.Unlock()
+	s.UnlockWithContext(ctx)
 
 	if err != nil && !errors.Is(err, state.ErrNoState) {
 		return err
@@ -102,7 +102,7 @@ func Apply(s *state.State) error {
 	if stateLevel == Level && stateSublevel > Sublevel {
 		s.Lock()
 		s.Set("patch-sublevel", Sublevel)
-		s.Unlock()
+		s.UnlockWithContext(ctx)
 		return nil
 	}
 
@@ -110,7 +110,7 @@ func Apply(s *state.State) error {
 	// the 0th sublevel patch is a patch for major level update (e.g. 7.0),
 	// therefore there is +1 for the indices.
 	if stateSublevel+1 < len(patches[stateLevel]) {
-		if err := applySublevelPatches(stateLevel, stateSublevel+1, s); err != nil {
+		if err := applySublevelPatches(ctx, stateLevel, stateSublevel+1, s); err != nil {
 			return err
 		}
 	}
@@ -122,7 +122,7 @@ func Apply(s *state.State) error {
 		if sublevels == nil {
 			return fmt.Errorf("cannot upgrade: software version is too new for the current system state (patch level %d)", level-1)
 		}
-		if err := applySublevelPatches(level, 0, s); err != nil {
+		if err := applySublevelPatches(ctx, level, 0, s); err != nil {
 			return err
 		}
 	}
@@ -130,9 +130,9 @@ func Apply(s *state.State) error {
 	return nil
 }
 
-func applyOne(patch func(s *state.State) error, s *state.State, newLevel, newSublevel int) error {
+func applyOne(ctx context.Context, patch func(s *state.State) error, s *state.State, newLevel, newSublevel int) error {
 	s.Lock()
-	defer s.Unlock()
+	defer s.UnlockWithContext(ctx)
 
 	err := patch(s)
 	if err != nil {

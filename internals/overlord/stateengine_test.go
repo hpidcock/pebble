@@ -15,6 +15,7 @@
 package overlord_test
 
 import (
+	"context"
 	"errors"
 
 	. "gopkg.in/check.v1"
@@ -45,7 +46,7 @@ func (fm *fakeManager) StartUp() error {
 	return fm.startupError
 }
 
-func (fm *fakeManager) Ensure() error {
+func (fm *fakeManager) Ensure(ctx context.Context) error {
 	*fm.calls = append(*fm.calls, "ensure:"+fm.name)
 	return fm.ensureError
 }
@@ -72,12 +73,12 @@ func (ses *stateEngineSuite) TestStartUp(c *C) {
 	se.AddManager(mgr1)
 	se.AddManager(mgr2)
 
-	err := se.StartUp()
+	err := se.StartUp(context.Background())
 	c.Assert(err, IsNil)
 	c.Check(calls, DeepEquals, []string{"startup:mgr1", "startup:mgr2"})
 
 	// noop
-	err = se.StartUp()
+	err = se.StartUp(context.Background())
 	c.Assert(err, IsNil)
 	c.Check(calls, HasLen, 2)
 }
@@ -97,7 +98,7 @@ func (ses *stateEngineSuite) TestStartUpError(c *C) {
 	se.AddManager(mgr1)
 	se.AddManager(mgr2)
 
-	err := se.StartUp()
+	err := se.StartUp(context.Background())
 	c.Check(err.Error(), DeepEquals, "state startup errors: [boom1 boom2]")
 	c.Check(calls, DeepEquals, []string{"startup:mgr1", "startup:mgr2"})
 }
@@ -114,16 +115,16 @@ func (ses *stateEngineSuite) TestEnsure(c *C) {
 	se.AddManager(mgr1)
 	se.AddManager(mgr2)
 
-	err := se.Ensure()
+	err := se.Ensure(context.Background())
 	c.Check(err, ErrorMatches, "state engine skipped startup")
-	c.Assert(se.StartUp(), IsNil)
+	c.Assert(se.StartUp(context.Background()), IsNil)
 	calls = []string{}
 
-	err = se.Ensure()
+	err = se.Ensure(context.Background())
 	c.Assert(err, IsNil)
 	c.Check(calls, DeepEquals, []string{"ensure:mgr1", "ensure:mgr2"})
 
-	err = se.Ensure()
+	err = se.Ensure(context.Background())
 	c.Assert(err, IsNil)
 	c.Check(calls, DeepEquals, []string{"ensure:mgr1", "ensure:mgr2", "ensure:mgr1", "ensure:mgr2"})
 }
@@ -143,10 +144,10 @@ func (ses *stateEngineSuite) TestEnsureError(c *C) {
 	se.AddManager(mgr1)
 	se.AddManager(mgr2)
 
-	c.Assert(se.StartUp(), IsNil)
+	c.Assert(se.StartUp(context.Background()), IsNil)
 	calls = []string{}
 
-	err := se.Ensure()
+	err := se.Ensure(context.Background())
 	c.Check(err.Error(), DeepEquals, "state ensure errors: [boom1 boom2]")
 	c.Check(calls, DeepEquals, []string{"ensure:mgr1", "ensure:mgr2"})
 }
@@ -163,14 +164,14 @@ func (ses *stateEngineSuite) TestStop(c *C) {
 	se.AddManager(mgr1)
 	se.AddManager(mgr2)
 
-	c.Assert(se.StartUp(), IsNil)
+	c.Assert(se.StartUp(context.Background()), IsNil)
 	calls = []string{}
 
-	se.Stop()
+	se.Stop(context.Background())
 	c.Check(calls, DeepEquals, []string{"stop:mgr2", "stop:mgr1"})
-	se.Stop()
+	se.Stop(context.Background())
 	c.Check(calls, HasLen, 2)
 
-	err := se.Ensure()
+	err := se.Ensure(context.Background())
 	c.Check(err, ErrorMatches, "state engine already stopped")
 }

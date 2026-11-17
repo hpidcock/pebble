@@ -16,6 +16,7 @@
 package pairingstate
 
 import (
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -129,7 +130,7 @@ func NewManager(st *state.State, identitiesMgr *identities.Manager) (*PairingMan
 }
 
 // PlanChanged informs the pairing manager that the plan has been updated.
-func (m *PairingManager) PlanChanged(update *plan.Plan) {
+func (m *PairingManager) PlanChanged(ctx context.Context, update *plan.Plan) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -143,7 +144,7 @@ func (m *PairingManager) PlanChanged(update *plan.Plan) {
 }
 
 // Ensure implements overlord.StateManager interface.
-func (m *PairingManager) Ensure() error {
+func (m *PairingManager) Ensure(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

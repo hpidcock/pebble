@@ -27,8 +27,7 @@ type overlordStateBackend struct {
 	ensureBefore func(d time.Duration)
 }
 
-func (osb *overlordStateBackend) Checkpoint(data []byte) (err error) {
-	ctx := context.TODO()
+func (osb *overlordStateBackend) Checkpoint(ctx context.Context, data []byte) (err error) {
 	defer trace.StartRegion(ctx, "pebble.state.write").End()
 	err = osutil.AtomicWriteFile(osb.path, data, 0600, 0)
 	trace.Logf(ctx, "write", "bytes=%d error=%v", len(data), err)
@@ -49,7 +48,7 @@ type inMemoryBackend struct {
 
 // Checkpoint of the in-memory backend does nothing because
 // we're keeping the state in memory only.
-func (imb *inMemoryBackend) Checkpoint(data []byte) error {
+func (imb *inMemoryBackend) Checkpoint(ctx context.Context, data []byte) error {
 	panic("internal error: inMemoryBackend.Checkpoint should never be called")
 }
 

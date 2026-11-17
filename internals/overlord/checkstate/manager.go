@@ -90,7 +90,7 @@ func NewManager(s *state.State, runner *state.TaskRunner, planMgr *planstate.Pla
 	return manager
 }
 
-func (m *CheckManager) Ensure() error {
+func (m *CheckManager) Ensure(ctx context.Context) error {
 	return nil
 }
 
@@ -102,9 +102,9 @@ func (m *CheckManager) NotifyCheckFailed(f FailureFunc) {
 
 // PlanChanged handles updates to the plan (server configuration),
 // stopping the previous checks and starting the new ones as required.
-func (m *CheckManager) PlanChanged(newPlan *plan.Plan) {
+func (m *CheckManager) PlanChanged(ctx context.Context, newPlan *plan.Plan) {
 	m.state.Lock()
-	defer m.state.Unlock()
+	defer m.state.UnlockWithContext(ctx)
 
 	shouldEnsure := false
 	newOrModified := make(map[string]bool)
@@ -178,7 +178,7 @@ func (m *CheckManager) PlanChanged(newPlan *plan.Plan) {
 	for _, config := range newPlan.Checks {
 		if newOrModified[config.Name] {
 			merged := mergeServiceContext(newPlan, config)
-			changeID := performCheckChange(m.state, merged)
+			changeID := performCheckChange(ctx, m.state, merged)
 			m.updateCheckData(config, changeID, "", 0, 0)
 			shouldEnsure = true
 		}
@@ -198,7 +198,7 @@ func (m *CheckManager) changeStatusChanged(change *state.Change, old, new state.
 		}
 		config := m.state.Cached(performConfigKey{change.ID()}).(*plan.Check) // panic if key not present (always should be)
 		prevChangeID := change.ID()
-		changeID := recoverCheckChange(m.state, config, details.Successes, details.Failures)
+		changeID := recoverCheckChange(change.TraceContext(), m.state, config, details.Successes, details.Failures)
 		m.updateCheckData(config, changeID, prevChangeID, details.Successes, details.Failures)
 		shouldEnsure = true
 
@@ -209,7 +209,7 @@ func (m *CheckManager) changeStatusChanged(change *state.Change, old, new state.
 		}
 		config := m.state.Cached(recoverConfigKey{change.ID()}).(*plan.Check) // panic if key not present (always should be)
 		prevChangeID := change.ID()
-		changeID := performCheckChange(m.state, config)
+		changeID := performCheckChange(change.TraceContext(), m.state, config)
 		m.updateCheckData(config, changeID, prevChangeID, details.Successes, details.Failures)
 		shouldEnsure = true
 	}
@@ -520,7 +520,7 @@ func (e *ChecksNotFound) Error() string {
 
 // StartChecks starts the checks with the specified names, if not already
 // running, and returns the checks that did need to be started.
-func (m *CheckManager) StartChecks(checks []string) (started []string, err error) {
+func (m *CheckManager) StartChecks(ctx context.Context, checks []string) (started []string, err error) {
 	currentPlan := m.planMgr.Plan()
 
 	// If any check specified is not in the plan, return an error.
@@ -535,7 +535,7 @@ func (m *CheckManager) StartChecks(checks []string) (started []string, err error
 	}
 
 	m.state.Lock()
-	defer m.state.Unlock()
+	defer m.state.UnlockWithContext(ctx)
 
 	for _, name := range checks {
 		check := currentPlan.Checks[name] // We know this is ok because we checked it above.
@@ -553,7 +553,7 @@ func (m *CheckManager) StartChecks(checks []string) (started []string, err error
 		if checkData.changeID != "" {
 			continue
 		}
-		changeID := performCheckChange(m.state, check)
+		changeID := performCheckChange(ctx, m.state, check)
 		m.updateCheckData(check, changeID, "", 0, 0)
 		started = append(started, check.Name)
 	}
@@ -563,7 +563,7 @@ func (m *CheckManager) StartChecks(checks []string) (started []string, err error
 
 // StopChecks stops the checks with the specified names, if currently running,
 // and returns the checks that did need to be stopped.
-func (m *CheckManager) StopChecks(checks []string) (stopped []string, err error) {
+func (m *CheckManager) StopChecks(ctx context.Context, checks []string) (stopped []string, err error) {
 	currentPlan := m.planMgr.Plan()
 
 	// If any check specified is not in the plan, return an error.
@@ -578,7 +578,7 @@ func (m *CheckManager) StopChecks(checks []string) (stopped []string, err error)
 	}
 
 	m.state.Lock()
-	defer m.state.Unlock()
+	defer m.state.UnlockWithContext(ctx)
 
 	for _, name := range checks {
 		check := currentPlan.Checks[name] // We know this is ok because we checked it above.
@@ -615,7 +615,7 @@ func (m *CheckManager) StopChecks(checks []string) (stopped []string, err error)
 // Checks that are "startup: disabled" but are already running do not get
 // stopped in a replan.
 // The state lock must be held when calling this method.
-func (m *CheckManager) Replan() {
+func (m *CheckManager) Replan(ctx context.Context) {
 	currentPlan := m.planMgr.Plan()
 
 	for _, check := range currentPlan.Checks {
@@ -636,7 +636,7 @@ func (m *CheckManager) Replan() {
 		if checkData.changeID != "" {
 			continue
 		}
-		changeID := performCheckChange(m.state, check)
+		changeID := performCheckChange(ctx, m.state, check)
 		m.updateCheckData(check, changeID, "", 0, 0)
 	}
 }

@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -161,7 +162,7 @@ func (ss *stateSuite) TestSetToNilDeletes(c *C) {
 
 func (ss *stateSuite) TestNullMeansNoState(c *C) {
 	buf := bytes.NewBufferString(`{"data": {"a": null}}`)
-	st, err := state.ReadState(nil, buf)
+	st, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 
 	st.Lock()
@@ -216,7 +217,7 @@ type fakeStateBackend struct {
 	ensureBefore time.Duration
 }
 
-func (b *fakeStateBackend) Checkpoint(data []byte) error {
+func (b *fakeStateBackend) Checkpoint(ctx context.Context, data []byte) error {
 	b.checkpoints = append(b.checkpoints, data)
 	if b.error != nil {
 		return b.error()
@@ -250,7 +251,7 @@ func (ss *stateSuite) TestImplicitCheckpointAndRead(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 	c.Assert(st2.Modified(), Equals, false)
 
@@ -368,7 +369,7 @@ func (ss *stateSuite) TestNewChangeWithNoticeData(c *C) {
 	defer st.Unlock()
 
 	extraData := map[string]string{"foo": "bar"}
-	chg := st.NewChangeWithNoticeData("perform-check", "...", extraData)
+	chg := st.NewChangeWithNoticeData(context.Background(), "perform-check", "...", extraData)
 
 	chgs := st.Changes()
 	c.Check(chgs, HasLen, 1)
@@ -385,7 +386,7 @@ func (ss *stateSuite) TestNewChangeWithNilNoticeData(c *C) {
 	defer st.Unlock()
 
 	st.NewChange("replan", "...")
-	st.NewChangeWithNoticeData("replan", "...", nil)
+	st.NewChangeWithNoticeData(context.Background(), "replan", "...", nil)
 
 	for _, chg := range st.Changes() {
 		c.Assert(chg.Has("notice-data"), Equals, false)
@@ -413,7 +414,7 @@ func (ss *stateSuite) TestNewChangeAndCheckpoint(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 	c.Assert(st2, NotNil)
 
@@ -464,7 +465,7 @@ func (ss *stateSuite) TestNewChangeAndCheckpointTaskDerivedStatus(c *C) {
 	c.Assert(b.checkpoints, HasLen, 1)
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 
 	st2.Lock()
@@ -516,7 +517,7 @@ func (ss *stateSuite) TestNewTaskAndCheckpoint(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 	c.Assert(st2, NotNil)
 
@@ -582,7 +583,7 @@ func (ss *stateSuite) TestEmptyStateDataAndCheckpointReadAndSet(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 	c.Assert(st2, NotNil)
 
@@ -634,7 +635,7 @@ func (ss *stateSuite) TestEmptyTaskAndChangeDataAndCheckpointReadAndSet(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 	c.Assert(st2, NotNil)
 
@@ -678,7 +679,7 @@ func (ss *stateSuite) TestCheckpointPreserveLastIds(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 
 	st2.Lock()
@@ -709,7 +710,7 @@ func (ss *stateSuite) TestCheckpointPreserveCleanStatus(c *C) {
 
 	buf := bytes.NewBuffer(b.checkpoints[0])
 
-	st2, err := state.ReadState(nil, buf)
+	st2, err := state.ReadState(context.Background(), nil, buf)
 	c.Assert(err, IsNil)
 
 	st2.Lock()
@@ -800,7 +801,7 @@ func (ss *stateSuite) TestMethodEntrance(c *C) {
 		func() { st.Tasks() },
 		func() { st.Task("foo") },
 		func() { st.MarshalJSON() },
-		func() { st.Prune(time.Now(), time.Hour, time.Hour, 100, 100) },
+		func() { st.Prune(context.Background(), time.Now(), time.Hour, time.Hour, 100, 100) },
 		func() { st.TaskCount() },
 	}
 
@@ -873,7 +874,7 @@ func (ss *stateSuite) TestPrune(c *C) {
 	state.FakeTaskTimes(t5, now.Add(-pruneWait), now.Add(-pruneWait))
 
 	past := time.Now().AddDate(-1, 0, 0)
-	st.Prune(past, pruneWait, abortWait, 100, 100)
+	st.Prune(context.Background(), past, pruneWait, abortWait, 100, 100)
 
 	c.Assert(st.Change(chg1.ID()), Equals, chg1)
 	c.Assert(st.Change(chg2.ID()), IsNil)
@@ -936,7 +937,7 @@ func (ss *stateSuite) TestRegisterPendingChangeByAttr(c *C) {
 	})
 
 	past := time.Now().AddDate(-1, 0, 0)
-	st.Prune(past, pruneWait, abortWait, 100, 100)
+	st.Prune(context.Background(), past, pruneWait, abortWait, 100, 100)
 
 	c.Assert(st.Change(chg1.ID()), Equals, chg1)
 	c.Assert(st.Change(chg2.ID()), Equals, chg2)
@@ -968,7 +969,7 @@ func (ss *stateSuite) TestPruneEmptyChange(c *C) {
 	state.FakeChangeTimes(chg, now.Add(-pruneWait), time.Time{})
 
 	past := time.Now().AddDate(-1, 0, 0)
-	st.Prune(past, pruneWait, abortWait, 100, 100)
+	st.Prune(context.Background(), past, pruneWait, abortWait, 100, 100)
 	c.Assert(st.Change(chg.ID()), IsNil)
 }
 
@@ -1006,13 +1007,13 @@ func (ss *stateSuite) TestPruneMaxChangesHappy(c *C) {
 	past := time.Now().AddDate(-1, 0, 0)
 	maxReadyChanges := 100
 	maxReadyNotices := 100
-	st.Prune(past, pruneWait, abortWait, maxReadyChanges, maxReadyNotices)
+	st.Prune(context.Background(), past, pruneWait, abortWait, maxReadyChanges, maxReadyNotices)
 	c.Assert(st.Changes(), HasLen, 15)
 
 	// but with maxReadyChanges we remove the ready ones
 	maxReadyChanges = 5
 	maxReadyNotices = 5
-	st.Prune(past, pruneWait, abortWait, maxReadyChanges, maxReadyNotices)
+	st.Prune(context.Background(), past, pruneWait, abortWait, maxReadyChanges, maxReadyNotices)
 	c.Assert(st.Changes(), HasLen, 10)
 	remaining := map[string]bool{}
 	for _, chg := range st.Changes() {
@@ -1050,7 +1051,7 @@ func (ss *stateSuite) TestPruneMaxChangesSomeNotReady(c *C) {
 	// nothing can be pruned
 	past := time.Now().AddDate(-1, 0, 0)
 	maxChanges := 5
-	st.Prune(past, 1*time.Hour, 3*time.Hour, maxChanges, maxChanges)
+	st.Prune(context.Background(), past, 1*time.Hour, 3*time.Hour, maxChanges, maxChanges)
 	c.Assert(st.Changes(), HasLen, 10)
 }
 
@@ -1080,7 +1081,7 @@ func (ss *stateSuite) TestPruneMaxChangesHonored(c *C) {
 	// this test we do not purge the freshly ready change
 	maxChanges := 10
 	past := time.Now().AddDate(-1, 0, 0)
-	st.Prune(past, 1*time.Hour, 3*time.Hour, maxChanges, maxChanges)
+	st.Prune(context.Background(), past, 1*time.Hour, 3*time.Hour, maxChanges, maxChanges)
 	c.Assert(st.Changes(), HasLen, 11)
 }
 
@@ -1105,20 +1106,20 @@ func (ss *stateSuite) TestPruneHonorsStartOperationTime(c *C) {
 	// start operation time is 2h ago, change is not aborted because
 	// it's less than abortWait limit.
 	opTime := now.Add(-startTime)
-	st.Prune(opTime, pruneWait, abortWait, 100, 100)
+	st.Prune(context.Background(), opTime, pruneWait, abortWait, 100, 100)
 	c.Assert(st.Changes(), HasLen, 1)
 	c.Check(chg.Status(), Equals, state.DoStatus)
 
 	// start operation time is 9h ago, change is aborted.
 	startTime = 9 * time.Hour
 	opTime = time.Now().Add(-startTime)
-	st.Prune(opTime, pruneWait, abortWait, 100, 100)
+	st.Prune(context.Background(), opTime, pruneWait, abortWait, 100, 100)
 	c.Assert(st.Changes(), HasLen, 1)
 	c.Check(chg.Status(), Equals, state.HoldStatus)
 }
 
 func (ss *stateSuite) TestReadStateInitsTransientMapFields(c *C) {
-	st, err := state.ReadState(nil, bytes.NewBufferString("{}"))
+	st, err := state.ReadState(context.Background(), nil, bytes.NewBufferString("{}"))
 	c.Assert(err, IsNil)
 	st.Lock()
 	defer st.Unlock()

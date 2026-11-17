@@ -15,6 +15,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -54,7 +55,7 @@ func (s *apiSuite) SetUpTest(c *check.C) {
 
 func (s *apiSuite) TearDownTest(c *check.C) {
 	if s.d != nil {
-		s.d.Overlord().Stop()
+		s.d.Overlord().Stop(context.Background())
 		s.d = nil
 	}
 	s.overlordStarted = false
@@ -71,11 +72,11 @@ func (s *apiSuite) daemon(c *check.C) *Daemon {
 	if s.d != nil {
 		panic("called daemon() twice")
 	}
-	d, err := New(&Options{Dir: s.pebbleDir})
+	d, err := New(context.Background(), &Options{Dir: s.pebbleDir})
 	c.Assert(err, check.IsNil)
 	d.addRoutes()
 
-	c.Assert(d.overlord.StartUp(), check.IsNil)
+	c.Assert(d.overlord.StartUp(context.Background()), check.IsNil)
 
 	s.d = d
 	return d

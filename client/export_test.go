@@ -47,7 +47,7 @@ func (client *Client) SetGetWebsocket(f getWebsocketFunc) {
 }
 
 func (client *Client) GetWebsocket(urlPath string) (clientWebsocket, error) {
-	return client.getWebsocket(urlPath)
+	return client.getWebsocket(context.Background(), urlPath)
 }
 
 // WaitStdinDone waits for WebsocketSendStream to be finished calling

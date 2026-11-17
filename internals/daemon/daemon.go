@@ -59,7 +59,7 @@ var (
 	ErrRestartExternal       = fmt.Errorf("daemon stop requested due to externally-handled reboot")
 
 	systemdSdNotify = systemd.SdNotify
-	stopOverlord    = func(o *overlord.Overlord) { _ = o.Stop() }
+	stopOverlord    = func(ctx context.Context, o *overlord.Overlord) { _ = o.Stop(ctx) }
 )
 
 // TransportType defines the possible API transport types we support. The
@@ -242,7 +242,7 @@ func userFromRequest(st *state.State, identitiesMgr *identities.Manager, r *http
 
 	st.Lock()
 	identity := identitiesMgr.IdentityFromInputs(userID, username, password, clientCert)
-	st.Unlock()
+	st.UnlockWithContext(r.Context())
 
 	if identity != nil {
 		u := &UserState{
@@ -472,8 +472,8 @@ func exitOnPanic(handler http.Handler, stderr io.Writer, exit func()) http.Handl
 
 // Init sets up the Daemon's internal workings.
 // Don't call more than once.
-func (d *Daemon) Init() error {
-	defer trace.StartRegion(context.TODO(), "pebble.daemon.init").End()
+func (d *Daemon) Init(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.daemon.init").End()
 	logger.SecurityWarn(logger.SecuritySysStartup, strconv.Itoa(os.Getuid()), "Starting daemon")
 
 	listenerMap := make(map[string]net.Listener)
@@ -566,16 +566,16 @@ func (d *Daemon) CanStandby() bool {
 	return systemd.SocketAvailable()
 }
 
-func (d *Daemon) initStandbyHandling() {
+func (d *Daemon) initStandbyHandling(ctx context.Context) {
 	d.standbyOpinions = standby.New(d.state)
 	d.standbyOpinions.AddOpinion(d)
 	d.standbyOpinions.AddOpinion(d.connTracker)
 	d.standbyOpinions.AddOpinion(d.overlord)
-	d.standbyOpinions.Start()
+	d.standbyOpinions.Start(ctx)
 }
 
-func (d *Daemon) Start() error {
-	defer trace.StartRegion(context.TODO(), "pebble.daemon.start").End()
+func (d *Daemon) Start(ctx context.Context) error {
+	defer trace.StartRegion(ctx, "pebble.daemon.start").End()
 	if d.rebootIsMissing {
 		// we need to schedule and wait for a system restart
 		d.tomb.Kill(nil)
@@ -588,7 +588,7 @@ func (d *Daemon) Start() error {
 	}
 
 	// now perform expensive overlord/manages initialisation
-	if err := d.overlord.StartUp(); err != nil {
+	if err := d.overlord.StartUp(ctx); err != nil {
 		return err
 	}
 
@@ -624,7 +624,7 @@ func (d *Daemon) Start() error {
 		})
 	})
 
-	d.initStandbyHandling()
+	d.initStandbyHandling(ctx)
 
 	d.overlord.Loop()
 
@@ -701,14 +701,14 @@ var (
 var shutdownTimeout = time.Second
 
 // Stop shuts down the Daemon.
-func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
-	ctx, end := trace.NewTask(context.TODO(), "pebble.daemon.shutdown")
+func (d *Daemon) Stop(ctx context.Context, sigCh chan<- os.Signal) error {
+	ctx, end := trace.NewTask(ctx, "pebble.daemon.shutdown")
 	defer end.End()
 	logger.SecurityWarn(logger.SecuritySysShutdown, strconv.Itoa(os.Getuid()), "Shutting down daemon")
 
 	if d.rebootIsMissing {
 		// we need to schedule/wait for a system restart again
-		return d.doReboot(sigCh, rebootRetryWaitTimeout)
+		return d.doReboot(ctx, sigCh, rebootRetryWaitTimeout)
 	}
 	if d.overlord == nil {
 		return fmt.Errorf("internal error: no Overlord")
@@ -732,7 +732,7 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	d.mu.Unlock()
 	trace.Logf(ctx, "shutdown", "restart=%v", requestedRestart)
 
-	d.standbyOpinions.Stop()
+	d.standbyOpinions.Stop(ctx)
 
 	if requestedRestart == restart.RestartSystem {
 		// give time to polling clients to notice restart
@@ -757,7 +757,7 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	// prevents new requests from starting while the overlord is stopping,
 	// while still allowing active requests such as exec change waits to
 	// finish after their tasks are cancelled.
-	stopOverlord(d.overlord)
+	stopOverlord(ctx, d.overlord)
 
 	shutdownErrValue := <-shutdownErr
 	cancel()
@@ -799,7 +799,7 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 	}
 
 	if requestedRestart == restart.RestartSystem {
-		return d.doReboot(sigCh, rebootWaitTimeout)
+		return d.doReboot(ctx, sigCh, rebootWaitTimeout)
 	}
 
 	switch requestedRestart {
@@ -818,7 +818,7 @@ func (d *Daemon) Stop(sigCh chan<- os.Signal) error {
 // for them all to stop.
 func (d *Daemon) stopRunningServices(ctx context.Context) error {
 	defer trace.StartRegion(ctx, "pebble.daemon.stop-running-services").End()
-	taskSet, err := servstate.StopRunning(d.state, d.overlord.ServiceManager())
+	taskSet, err := servstate.StopRunning(ctx, d.state, d.overlord.ServiceManager())
 	if err != nil {
 		return err
 	}
@@ -834,7 +834,7 @@ func (d *Daemon) stopRunningServices(ctx context.Context) error {
 	chg := st.NewChangeWithContext(ctx, "stop", "Stop all running services")
 	chg.AddAll(taskSet)
 	st.EnsureBefore(0) // start operation right away
-	st.Unlock()
+	st.UnlockWithContext(ctx)
 
 	// Wait for a limited amount of time for them to stop.
 	select {
@@ -848,9 +848,9 @@ func (d *Daemon) stopRunningServices(ctx context.Context) error {
 	return nil
 }
 
-func (d *Daemon) rebootDelay() (time.Duration, error) {
+func (d *Daemon) rebootDelay(ctx context.Context) (time.Duration, error) {
 	d.state.Lock()
-	defer d.state.Unlock()
+	defer d.state.UnlockWithContext(ctx)
 	now := time.Now()
 	// see whether a reboot had already been scheduled
 	var rebootAt time.Time
@@ -875,14 +875,13 @@ func (d *Daemon) rebootDelay() (time.Duration, error) {
 	return rebootDelay, nil
 }
 
-func (d *Daemon) doReboot(sigCh chan<- os.Signal, waitTimeout time.Duration) error {
-	ctx := context.TODO()
+func (d *Daemon) doReboot(ctx context.Context, sigCh chan<- os.Signal, waitTimeout time.Duration) error {
 	defer trace.StartRegion(ctx, "pebble.daemon.reboot").End()
 	if rebootMode == ExternalMode {
 		return ErrRestartExternal
 	}
 
-	rebootDelay, err := d.rebootDelay()
+	rebootDelay, err := d.rebootDelay(ctx)
 	if err != nil {
 		return err
 	}
@@ -1036,8 +1035,8 @@ func (d *Daemon) RebootDidNotHappen(st *state.State) error {
 
 // SetServiceArgs updates the specified service commands by replacing
 // existing arguments with the newly specified arguments.
-func (d *Daemon) SetServiceArgs(serviceArgs map[string][]string) error {
-	return d.overlord.PlanManager().SetServiceArgs(serviceArgs)
+func (d *Daemon) SetServiceArgs(ctx context.Context, serviceArgs map[string][]string) error {
+	return d.overlord.PlanManager().SetServiceArgs(ctx, serviceArgs)
 }
 
 // pairingWindowEnabled is a helper function to simplify testing of code
@@ -1047,8 +1046,8 @@ func (d *Daemon) pairingWindowEnabled() bool {
 	return pairingManager.PairingEnabled()
 }
 
-func New(opts *Options) (*Daemon, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.daemon.new").End()
+func New(ctx context.Context, opts *Options) (*Daemon, error) {
+	defer trace.StartRegion(ctx, "pebble.daemon.new").End()
 	d := &Daemon{
 		options: opts,
 	}
@@ -1063,7 +1062,7 @@ func New(opts *Options) (*Daemon, error) {
 		Persist:        opts.Persist,
 	}
 
-	ovld, err := overlord.New(&ovldOptions)
+	ovld, err := overlord.New(ctx, &ovldOptions)
 	if err == errExpectedReboot {
 		// we proceed without overlord until we reach Stop
 		// where we will schedule and wait again for a system restart.

@@ -17,6 +17,7 @@ package overlord_test
 // test the various managers and their operation together through overlord
 
 import (
+	"context"
 	. "gopkg.in/check.v1"
 
 	"github.com/canonical/pebble/internals/overlord"
@@ -40,15 +41,15 @@ func (s *mgrsSuite) SetUpTest(c *C) {
 
 	s.dir = c.MkDir()
 
-	o, err := overlord.New(&overlord.Options{PebbleDir: s.dir})
+	o, err := overlord.New(context.Background(), &overlord.Options{PebbleDir: s.dir})
 	c.Assert(err, IsNil)
-	err = o.StartUp()
+	err = o.StartUp(context.Background())
 	c.Assert(err, IsNil)
 	s.o = o
 }
 
 func (s *mgrsSuite) TearDownTest(c *C) {
 	if s.o != nil {
-		c.Assert(s.o.Stop(), IsNil)
+		c.Assert(s.o.Stop(context.Background()), IsNil)
 	}
 }

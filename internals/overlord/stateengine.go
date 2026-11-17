@@ -29,7 +29,7 @@ import (
 type StateManager interface {
 	// Ensure forces a complete evaluation of the current state.
 	// See StateEngine.Ensure for more details.
-	Ensure() error
+	Ensure(ctx context.Context) error
 }
 
 // StateStarterUp is optionally implemented by StateManager that have expensive
@@ -91,8 +91,8 @@ func (e *startupError) Error() string {
 }
 
 // StartUp asks all managers to perform any expensive initialization. It is a noop after the first invocation.
-func (se *StateEngine) StartUp() error {
-	ctx, end := trace.NewTask(context.TODO(), "pebble.state.startup")
+func (se *StateEngine) StartUp(ctx context.Context) error {
+	ctx, end := trace.NewTask(ctx, "pebble.state.startup")
 	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
@@ -134,8 +134,8 @@ func (e *ensureError) Error() string {
 // that request, and report whether they found any critical issues. They
 // must not perform long running activities during that operation, though.
 // These should be performed in properly tracked changes and tasks.
-func (se *StateEngine) Ensure() error {
-	ctx, end := trace.NewTask(context.TODO(), "pebble.ensure")
+func (se *StateEngine) Ensure(ctx context.Context) error {
+	ctx, end := trace.NewTask(ctx, "pebble.ensure")
 	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
@@ -148,7 +148,7 @@ func (se *StateEngine) Ensure() error {
 	var errs []error
 	for _, m := range se.managers {
 		region := trace.StartRegion(ctx, fmt.Sprintf("pebble.ensure %T", m))
-		err := m.Ensure()
+		err := m.Ensure(ctx)
 		region.End()
 		if err != nil {
 			trace.Logf(ctx, "error", "manager=%T error=%v", m, err)
@@ -170,8 +170,8 @@ func (se *StateEngine) AddManager(m StateManager) {
 }
 
 // Wait waits for all managers current activities.
-func (se *StateEngine) Wait() {
-	ctx, end := trace.NewTask(context.TODO(), "pebble.state.wait")
+func (se *StateEngine) Wait(ctx context.Context) {
+	ctx, end := trace.NewTask(ctx, "pebble.state.wait")
 	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()
@@ -188,8 +188,8 @@ func (se *StateEngine) Wait() {
 }
 
 // Stop asks all managers to terminate activities running concurrently.
-func (se *StateEngine) Stop() {
-	ctx, end := trace.NewTask(context.TODO(), "pebble.state.stop")
+func (se *StateEngine) Stop(ctx context.Context) {
+	ctx, end := trace.NewTask(ctx, "pebble.state.stop")
 	defer end.End()
 	se.mgrLock.Lock()
 	defer se.mgrLock.Unlock()

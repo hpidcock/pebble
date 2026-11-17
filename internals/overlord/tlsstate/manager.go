@@ -16,6 +16,7 @@
 package tlsstate
 
 import (
+	"context"
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -243,7 +244,7 @@ func (m *TLSManager) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, err
 }
 
 // Ensure implements StateManager.Ensure.
-func (m *TLSManager) Ensure() error {
+func (m *TLSManager) Ensure(ctx context.Context) error {
 	return nil
 }
 

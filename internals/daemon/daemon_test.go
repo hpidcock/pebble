@@ -101,12 +101,12 @@ func (s *daemonSuite) TearDownTest(c *C) {
 	for _, d := range s.daemons {
 		func() {
 			defer func() { _ = recover() }()
-			_ = d.Overlord().Stop()
+			_ = d.Overlord().Stop(context.Background())
 		}()
 	}
 	s.daemons = nil
 	systemdSdNotify = systemd.SdNotify
-	stopOverlord = func(o *overlord.Overlord) { _ = o.Stop() }
+	stopOverlord = func(ctx context.Context, o *overlord.Overlord) { _ = o.Stop(ctx) }
 	s.notified = nil
 	s.authorized = false
 	s.err = nil
@@ -119,7 +119,7 @@ func (s *daemonSuite) TearDownTest(c *C) {
 }
 
 func (s *daemonSuite) newDaemon(c *C) *Daemon {
-	d, err := New(&Options{
+	d, err := New(context.Background(), &Options{
 		Dir:          s.pebbleDir,
 		SocketPath:   s.socketPath,
 		HTTPAddress:  s.httpAddress,
@@ -167,7 +167,7 @@ type fakeManager struct {
 	ensureCalls int
 }
 
-func (m *fakeManager) Ensure() error {
+func (m *fakeManager) Ensure(ctx context.Context) error {
 	m.ensureCalls++
 	return nil
 }
@@ -189,17 +189,17 @@ func (otherFakeExtension) ExtraManagers(o *overlord.Overlord) ([]overlord.StateM
 }
 
 func (s *daemonSuite) TestExternalManager(c *C) {
-	d, err := New(&Options{
+	d, err := New(context.Background(), &Options{
 		Dir:               s.pebbleDir,
 		SocketPath:        s.socketPath,
 		HTTPAddress:       s.httpAddress,
 		OverlordExtension: &fakeExtension{},
 	})
 	c.Assert(err, IsNil)
-	defer d.overlord.Stop()
-	err = d.overlord.StartUp()
+	defer d.overlord.Stop(context.Background())
+	err = d.overlord.StartUp(context.Background())
 	c.Assert(err, IsNil)
-	err = d.overlord.StateEngine().Ensure()
+	err = d.overlord.StateEngine().Ensure(context.Background())
 	c.Assert(err, IsNil)
 	extension, ok := d.overlord.Extension().(*fakeExtension)
 	c.Assert(ok, Equals, true)
@@ -209,27 +209,27 @@ func (s *daemonSuite) TestExternalManager(c *C) {
 }
 
 func (s *daemonSuite) TestNoExtension(c *C) {
-	d, err := New(&Options{
+	d, err := New(context.Background(), &Options{
 		Dir:         s.pebbleDir,
 		SocketPath:  s.socketPath,
 		HTTPAddress: s.httpAddress,
 	})
 	c.Assert(err, IsNil)
-	defer d.overlord.Stop()
+	defer d.overlord.Stop(context.Background())
 
 	extension := d.overlord.Extension()
 	c.Assert(extension, IsNil)
 }
 
 func (s *daemonSuite) TestWrongExtension(c *C) {
-	d, err := New(&Options{
+	d, err := New(context.Background(), &Options{
 		Dir:               s.pebbleDir,
 		SocketPath:        s.socketPath,
 		HTTPAddress:       s.httpAddress,
 		OverlordExtension: &fakeExtension{},
 	})
 	c.Assert(err, IsNil)
-	defer d.overlord.Stop()
+	defer d.overlord.Stop(context.Background())
 
 	_, ok := d.overlord.Extension().(*otherFakeExtension)
 	c.Assert(ok, Equals, false)
@@ -254,9 +254,9 @@ func (s *daemonSuite) TestAddCommand(c *C) {
 	}()
 
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
-	defer d.Stop(nil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
+	defer d.Stop(context.Background(), nil)
 
 	req := httptest.NewRequest("GET", endpoint, nil)
 	req = req.WithContext(context.WithValue(req.Context(), TransportTypeKey{}, TransportTypeUnixSocket))
@@ -280,9 +280,9 @@ func (s *daemonSuite) TestPathPrefix(c *C) {
 	defer func() { API = API[:len(API)-1] }()
 
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
-	defer d.Stop(nil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
+	defer d.Stop(context.Background(), nil)
 
 	req := httptest.NewRequest("GET", endpoint+"/child", nil)
 	req = req.WithContext(context.WithValue(req.Context(), TransportTypeKey{}, TransportTypeUnixSocket))
@@ -296,9 +296,9 @@ func (s *daemonSuite) TestExplicitPaths(c *C) {
 	s.socketPath = filepath.Join(c.MkDir(), "custom.socket")
 
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
-	defer d.Stop(nil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
+	defer d.Stop(context.Background(), nil)
 
 	info, err := os.Stat(s.socketPath)
 	c.Assert(err, IsNil)
@@ -735,7 +735,7 @@ func (s *daemonSuite) TestStartStop(c *C) {
 	generalAccept := make(chan struct{})
 	d.generalListener = &witnessAcceptListener{Listener: l1, accept: generalAccept}
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	generalDone := make(chan struct{})
 	go func() {
@@ -749,7 +749,7 @@ func (s *daemonSuite) TestStartStop(c *C) {
 
 	<-generalDone
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Check(err, IsNil)
 }
 
@@ -762,8 +762,8 @@ func (s *daemonSuite) TestRestartWiring(c *C) {
 	generalAccept := make(chan struct{})
 	d.generalListener = &witnessAcceptListener{Listener: l, accept: generalAccept}
 
-	c.Assert(d.Start(), IsNil)
-	defer d.Stop(nil)
+	c.Assert(d.Start(context.Background()), IsNil)
+	defer d.Stop(context.Background(), nil)
 
 	generalDone := make(chan struct{})
 	go func() {
@@ -811,7 +811,7 @@ func (s *daemonSuite) TestGracefulStop(c *C) {
 	generalClosed := make(chan struct{})
 	d.generalListener = &witnessAcceptListener{Listener: generalL, accept: generalAccept, closed: generalClosed}
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	generalAccepting := make(chan struct{})
 	go func() {
@@ -844,7 +844,7 @@ func (s *daemonSuite) TestGracefulStop(c *C) {
 	}()
 
 	<-responding
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	doRespond <- false
 	c.Check(err, IsNil)
 
@@ -865,23 +865,23 @@ func (s *daemonSuite) TestShutdownClosesListenersBeforeOverlord(c *C) {
 	d.generalListener = &witnessAcceptListener{Listener: generalL, accept: generalAccept, closed: generalClosed}
 
 	listenerClosedBeforeOverlord := false
-	stopOverlord = func(o *overlord.Overlord) {
+	stopOverlord = func(ctx context.Context, o *overlord.Overlord) {
 		select {
 		case <-generalClosed:
 			listenerClosedBeforeOverlord = true
 		default:
 		}
-		_ = o.Stop()
+		_ = o.Stop(ctx)
 	}
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 	select {
 	case <-generalAccept:
 	case <-time.After(2 * time.Second):
 		c.Fatal("general accept was not called")
 	}
 
-	c.Assert(d.Stop(nil), IsNil)
+	c.Assert(d.Stop(context.Background(), nil), IsNil)
 	c.Check(listenerClosedBeforeOverlord, Equals, true)
 }
 
@@ -894,8 +894,8 @@ func (s *daemonSuite) TestRestartSystemWiring(c *C) {
 	generalAccept := make(chan struct{})
 	d.generalListener = &witnessAcceptListener{Listener: l, accept: generalAccept}
 
-	c.Assert(d.Start(), IsNil)
-	defer d.Stop(nil)
+	c.Assert(d.Start(context.Background()), IsNil)
+	defer d.Stop(context.Background(), nil)
 
 	st := d.overlord.State()
 
@@ -955,7 +955,7 @@ func (s *daemonSuite) TestRestartSystemWiring(c *C) {
 
 	now := time.Now()
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 
 	c.Check(err, ErrorMatches, "expected reboot did not happen")
 
@@ -1025,7 +1025,7 @@ func (s *daemonSuite) TestRestartShutdownWithSigtermInBetween(c *C) {
 	d := s.newDaemon(c)
 	makeDaemonListeners(c, d)
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 	st := d.overlord.State()
 
 	st.Lock()
@@ -1035,7 +1035,7 @@ func (s *daemonSuite) TestRestartShutdownWithSigtermInBetween(c *C) {
 	ch := make(chan os.Signal, 2)
 	ch <- syscall.SIGTERM
 	// stop will check if we got a sigterm in between (which we did)
-	err := d.Stop(ch)
+	err := d.Stop(context.Background(), ch)
 	c.Assert(err, IsNil)
 }
 
@@ -1057,7 +1057,7 @@ func (s *daemonSuite) TestRestartShutdown(c *C) {
 	d := s.newDaemon(c)
 	makeDaemonListeners(c, d)
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 	st := d.overlord.State()
 
 	st.Lock()
@@ -1066,7 +1066,7 @@ func (s *daemonSuite) TestRestartShutdown(c *C) {
 
 	sigCh := make(chan os.Signal, 2)
 	// stop (this will timeout but thats not relevant for this test)
-	d.Stop(sigCh)
+	d.Stop(context.Background(), sigCh)
 
 	// ensure that the sigCh got closed as part of the stop
 	_, chOpen := <-sigCh
@@ -1104,7 +1104,7 @@ func (s *daemonSuite) TestRestartExpectedRebootIsMissing(c *C) {
 	c.Check(err, IsNil)
 	c.Check(n, Equals, 1)
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	c.Check(s.notified, DeepEquals, []string{"READY=1"})
 
@@ -1116,7 +1116,7 @@ func (s *daemonSuite) TestRestartExpectedRebootIsMissing(c *C) {
 
 	sigCh := make(chan os.Signal, 2)
 	// stop (this will timeout but thats not relevant for this test)
-	d.Stop(sigCh)
+	d.Stop(context.Background(), sigCh)
 
 	// an immediate shutdown was scheduled again
 	c.Check(cmd.Calls(), DeepEquals, [][]string{
@@ -1180,11 +1180,11 @@ func (s *daemonSuite) TestRestartIntoSocketModeNoNewChanges(c *C) {
 	d := s.newDaemon(c)
 	makeDaemonListeners(c, d)
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	// pretend some ensure happened
 	for range 5 {
-		c.Check(d.overlord.StateEngine().Ensure(), IsNil)
+		c.Check(d.overlord.StateEngine().Ensure(context.Background()), IsNil)
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -1199,7 +1199,7 @@ func (s *daemonSuite) TestRestartIntoSocketModeNoNewChanges(c *C) {
 	case <-time.After(15 * time.Second):
 		c.Errorf("daemon did not stop after 15s")
 	}
-	err := d.Stop(nil)
+	err := d.Stop(context.Background(), nil)
 	c.Check(err, Equals, ErrRestartSocket)
 	c.Check(d.requestedRestart, Equals, restart.RestartSocket)
 }
@@ -1216,10 +1216,10 @@ func (s *daemonSuite) TestRestartIntoSocketModePendingChanges(c *C) {
 
 	st := d.overlord.State()
 
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 	// pretend some ensure happened
 	for range 5 {
-		c.Check(d.overlord.StateEngine().Ensure(), IsNil)
+		c.Check(d.overlord.StateEngine().Ensure(context.Background()), IsNil)
 		time.Sleep(5 * time.Millisecond)
 	}
 
@@ -1242,7 +1242,7 @@ func (s *daemonSuite) TestRestartIntoSocketModePendingChanges(c *C) {
 		c.Errorf("daemon did not stop after 5s")
 	}
 	// when the daemon got a pending change it just restarts
-	err := d.Stop(nil)
+	err := d.Stop(context.Background(), nil)
 	c.Check(err, IsNil)
 	c.Check(d.requestedRestart, Equals, restart.RestartDaemon)
 }
@@ -1256,9 +1256,9 @@ services:
         on-failure: shutdown
 `)
 	d := s.newDaemon(c)
-	err := d.Init()
+	err := d.Init(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	// Start the test service.
 	payload := bytes.NewBufferString(`{"action": "start", "services": ["test1"]}`)
@@ -1291,7 +1291,7 @@ services:
 	}
 
 	// Ensure it returned a service-failure error.
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, Equals, ErrRestartServiceFailure)
 }
 
@@ -1315,7 +1315,7 @@ func (s *daemonSuite) TestRebootExternal(c *C) {
 
 	d := s.newDaemon(c)
 	makeDaemonListeners(c, d)
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	st := d.overlord.State()
 	st.Lock()
@@ -1334,7 +1334,7 @@ func (s *daemonSuite) TestRebootExternal(c *C) {
 
 	c.Assert(restartType, Equals, restart.RestartSystem)
 
-	err := d.Stop(nil)
+	err := d.Stop(context.Background(), nil)
 	c.Assert(errors.Is(err, ErrRestartExternal), Equals, true)
 
 	d.mu.Lock()
@@ -1405,14 +1405,14 @@ func (s *daemonSuite) TestHTTPAPI(c *C) {
 
 	s.httpAddress = ":0" // Go will choose port (use listener.Addr() to find it)
 	d := s.newDaemon(c)
-	d.Init()
-	c.Assert(d.Start(), IsNil)
+	d.Init(context.Background())
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	cleanupServer := true
 	defer func() {
 		// If we exit early (test failure), clean up.
 		if cleanupServer {
-			d.Stop(nil)
+			d.Stop(context.Background(), nil)
 		}
 	}()
 
@@ -1441,7 +1441,7 @@ func (s *daemonSuite) TestHTTPAPI(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(response.StatusCode, Equals, http.StatusUnauthorized)
 
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Daemon already stopped, no need to do it again during defer.
@@ -1463,9 +1463,9 @@ services:
         command: sleep 10
 `)
 	d := s.newDaemon(c)
-	err := d.Init()
+	err := d.Init(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	// Start the test service.
 	payload := bytes.NewBufferString(`{"action": "start", "services": ["test1"]}`)
@@ -1491,7 +1491,7 @@ services:
 	}
 
 	// Stop the daemon (which should shut down the service manager and stop services).
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Ensure the "stop" change was created, along with its "stop" tasks.
@@ -1522,9 +1522,9 @@ services:
         command: sleep 10
 `)
 	d := s.newDaemon(c)
-	err := d.Init()
+	err := d.Init(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(d.Start(), IsNil)
+	c.Assert(d.Start(context.Background()), IsNil)
 
 	// Start the test service.
 	payload := bytes.NewBufferString(`{"action": "start", "services": ["test1"]}`)
@@ -1550,7 +1550,7 @@ services:
 
 	// Stop the daemon, which should stop services in starting state. At this point,
 	// it should still be within the okayDelay.
-	err = d.Stop(nil)
+	err = d.Stop(context.Background(), nil)
 	c.Assert(err, IsNil)
 
 	// Ensure a "stop" change is created, along with its "stop" tasks.

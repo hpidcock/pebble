@@ -16,6 +16,7 @@ package planstate_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,7 +63,7 @@ func (ps *planSuite) writeLayer(c *C, layer string) {
 }
 
 func (ps *planSuite) parseLayer(c *C, order int, label, layerYAML string) *plan.Layer {
-	layer, err := plan.ParseLayer(order, label, []byte(layerYAML))
+	layer, err := plan.ParseLayer(context.Background(), order, label, []byte(layerYAML))
 	c.Assert(err, IsNil)
 	return layer
 }

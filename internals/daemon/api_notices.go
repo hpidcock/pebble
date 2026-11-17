@@ -107,7 +107,7 @@ func v1GetNotices(c *Command, r *http.Request, user *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 
 	var notices []*state.Notice
 
@@ -227,7 +227,7 @@ func v1PostNotices(c *Command, r *http.Request, user *UserState) Response {
 
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 
 	noticeId, err := st.AddNotice(user.UID, state.CustomNotice, payload.Key, &state.AddNoticeOptions{
 		Data:        data,
@@ -247,7 +247,7 @@ func v1GetNotice(c *Command, r *http.Request, user *UserState) Response {
 	noticeID := r.PathValue("id")
 	st := c.d.overlord.State()
 	st.Lock()
-	defer st.Unlock()
+	defer st.UnlockWithContext(r.Context())
 	notice := st.Notice(noticeID)
 	if notice == nil {
 		return NotFound("cannot find notice with ID %q", noticeID)

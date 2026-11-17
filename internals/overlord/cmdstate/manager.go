@@ -15,6 +15,7 @@
 package cmdstate
 
 import (
+	"context"
 	"net/http"
 	"runtime/trace"
 	"sync"
@@ -41,7 +42,7 @@ func NewManager(runner *state.TaskRunner) *CommandManager {
 	runner.AddCleanup("exec", func(task *state.Task, tomb *tomb.Tomb) error {
 		st := task.State()
 		st.Lock()
-		defer st.Unlock()
+		defer st.UnlockWithContext(task.TraceContext())
 		st.Cache(execSetupKey{task.ID()}, nil)
 		return nil
 	})
@@ -54,7 +55,7 @@ type execSetupKey struct {
 }
 
 // Ensure is part of the overlord.StateManager interface.
-func (m *CommandManager) Ensure() error {
+func (m *CommandManager) Ensure(ctx context.Context) error {
 	return nil
 }
 
@@ -84,11 +85,11 @@ func (m *CommandManager) Connect(r *http.Request, w http.ResponseWriter, task *s
 	st := task.State()
 	st.Lock()
 	change := task.Change()
-	st.Unlock()
+	st.UnlockWithContext(r.Context())
 
 	changeErr := func() error {
 		st.Lock()
-		defer st.Unlock()
+		defer st.UnlockWithContext(r.Context())
 		return change.Err()
 	}
 

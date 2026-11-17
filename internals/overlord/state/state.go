@@ -35,7 +35,7 @@ import (
 // A Backend is used by State to checkpoint on every unlock operation
 // and to mediate requests to ensure the state sooner or request restarts.
 type Backend interface {
-	Checkpoint(data []byte) error
+	Checkpoint(ctx context.Context, data []byte) error
 	EnsureBefore(d time.Duration)
 	NeedsCheckpoint() bool
 }
@@ -227,8 +227,8 @@ func (s *State) LegacyIdentities() json.RawMessage {
 	return s.legacyIdentities
 }
 
-func (s *State) checkpointData() []byte {
-	defer trace.StartRegion(context.TODO(), "pebble.state.marshal").End()
+func (s *State) checkpointData(ctx context.Context) []byte {
+	defer trace.StartRegion(ctx, "pebble.state.marshal").End()
 	data, err := json.Marshal(s)
 	if err != nil {
 		// this shouldn't happen, because the actual delicate serializing happens at various Set()s
@@ -256,6 +256,12 @@ func (s *State) Unlocker() (unlock func() (relock func())) {
 // It does not return until the state is correctly checkpointed.
 // After too many unsuccessful checkpoint attempts, it panics.
 func (s *State) Unlock() {
+	s.UnlockWithContext(context.Background())
+}
+
+// UnlockWithContext releases the state lock and checkpoints the state,
+// associating the checkpoint trace with ctx.
+func (s *State) UnlockWithContext(ctx context.Context) {
 	defer s.unlock()
 	if !s.modified || s.backend == nil {
 		return
@@ -266,15 +272,14 @@ func (s *State) Unlock() {
 		return
 	}
 
-	ctx := context.TODO()
 	defer trace.StartRegion(ctx, "pebble.state.checkpoint").End()
-	data := s.checkpointData()
+	data := s.checkpointData(ctx)
 	var err error
 	attempts := 0
 	start := time.Now()
 	for time.Since(start) <= unlockCheckpointRetryMaxTime {
 		attempts++
-		if err = s.backend.Checkpoint(data); err == nil {
+		if err = s.backend.Checkpoint(ctx, data); err == nil {
 			s.modified = false
 			trace.Logf(ctx, "checkpoint", "bytes=%d attempts=%d", len(data), attempts)
 			return
@@ -362,7 +367,7 @@ func (s *State) Cache(key, value any) {
 
 // NewChange adds a new change to the state.
 func (s *State) NewChange(kind, summary string) *Change {
-	return s.NewChangeWithContext(context.TODO(), kind, summary)
+	return s.NewChangeWithContext(context.Background(), kind, summary)
 }
 
 // NewChangeWithContext adds a new change to the state and associates its
@@ -372,8 +377,8 @@ func (s *State) NewChangeWithContext(ctx context.Context, kind, summary string) 
 }
 
 // NewChangeWithNoticeData adds a new change to the state, adding in any provided notice data.
-func (s *State) NewChangeWithNoticeData(kind, summary string, noticeData map[string]string) *Change {
-	return s.newChangeWithNoticeData(context.TODO(), kind, summary, noticeData)
+func (s *State) NewChangeWithNoticeData(ctx context.Context, kind, summary string, noticeData map[string]string) *Change {
+	return s.newChangeWithNoticeData(ctx, kind, summary, noticeData)
 }
 
 func (s *State) newChangeWithNoticeData(ctx context.Context, kind, summary string, noticeData map[string]string) *Change {
@@ -491,8 +496,7 @@ func (s *State) RegisterPendingChangeByAttr(attr string, f func(*Change) bool) {
 //     more than maxNotices they are removed until we reach maxNotices. When pruning
 //     down to maxNotices, the oldest lastOccurred are removed (in other words,
 //     we keep recent notices in favor of older notices.)
-func (s *State) Prune(startOfOperation time.Time, pruneWait, abortWait time.Duration, maxReadyChanges, maxNotices int) {
-	ctx := context.TODO()
+func (s *State) Prune(ctx context.Context, startOfOperation time.Time, pruneWait, abortWait time.Duration, maxReadyChanges, maxNotices int) {
 	defer trace.StartRegion(ctx, "pebble.state.prune").End()
 	now := time.Now()
 	pruneLimit := now.Add(-pruneWait)
@@ -733,8 +737,8 @@ func (s *State) SaveTimings(timings any) {
 }
 
 // ReadState returns the state deserialized from r.
-func ReadState(backend Backend, r io.Reader) (*State, error) {
-	defer trace.StartRegion(context.TODO(), "pebble.state.read").End()
+func ReadState(ctx context.Context, backend Backend, r io.Reader) (*State, error) {
+	defer trace.StartRegion(ctx, "pebble.state.read").End()
 	s := new(State)
 	s.Lock()
 	defer s.unlock()

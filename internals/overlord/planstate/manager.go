@@ -57,8 +57,8 @@ func NewManager(layersDir string) (*PlanManager, error) {
 // final plan, and finally notifies registered managers of the plan update. In
 // the case of a non-existent layers directory, or no layers in the layers
 // directory, the base plan (or an empty plan) is announced to change subscribers.
-func (m *PlanManager) Load(base *plan.Plan) (err error) {
-	defer trace.StartRegion(context.TODO(), "pebble.plan.load").End()
+func (m *PlanManager) Load(ctx context.Context, base *plan.Plan) (err error) {
+	defer trace.StartRegion(ctx, "pebble.plan.load").End()
 	m.planLock.Lock()
 
 	var p *plan.Plan
@@ -66,7 +66,7 @@ func (m *PlanManager) Load(base *plan.Plan) (err error) {
 	defer func() {
 		m.planLock.Unlock()
 		if err == nil && !wasLoaded {
-			m.callChangeListeners(p)
+			m.callChangeListeners(ctx, p)
 		}
 	}()
 
@@ -74,7 +74,7 @@ func (m *PlanManager) Load(base *plan.Plan) (err error) {
 		return nil
 	}
 
-	p, err = plan.ReadDir(m.layersDir, base)
+	p, err = plan.ReadDir(ctx, m.layersDir, base)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (m *PlanManager) Load(base *plan.Plan) (err error) {
 }
 
 // PlanChangedFunc is the function type used by AddChangeListener.
-type PlanChangedFunc func(p *plan.Plan)
+type PlanChangedFunc func(ctx context.Context, p *plan.Plan)
 
 // AddChangeListener adds f to the list of functions that are called whenever
 // a plan change event took place (Load, AppendLayer, CombineLayer). A plan
@@ -94,15 +94,15 @@ func (m *PlanManager) AddChangeListener(f PlanChangedFunc) {
 	m.changeListeners = append(m.changeListeners, f)
 }
 
-func (m *PlanManager) callChangeListeners(plan *plan.Plan) {
+func (m *PlanManager) callChangeListeners(ctx context.Context, plan *plan.Plan) {
 	if plan == nil {
 		// Avoids if statement on every deferred call to this method (we
 		// shouldn't call listeners when the operation fails).
 		return
 	}
-	defer trace.StartRegion(context.TODO(), "pebble.plan.listeners").End()
+	defer trace.StartRegion(ctx, "pebble.plan.listeners").End()
 	for _, f := range m.changeListeners {
-		f(plan)
+		f(ctx, plan)
 	}
 }
 
@@ -122,12 +122,11 @@ func (m *PlanManager) Plan() *plan.Plan {
 // if the append operation may be demoted to an insert due to the layer
 // configuration being located in a sub-directory. On any error the plan is
 // left exactly as it was, including its layer list.
-func (m *PlanManager) AppendLayer(layer *plan.Layer, inner bool) error {
-	ctx := context.TODO()
+func (m *PlanManager) AppendLayer(ctx context.Context, layer *plan.Layer, inner bool) error {
 	defer trace.StartRegion(ctx, "pebble.plan.append").End()
 	trace.Logf(ctx, "layer", "label=%s", layer.Label)
 	var newPlan *plan.Plan
-	defer func() { m.callChangeListeners(newPlan) }()
+	defer func() { m.callChangeListeners(ctx, newPlan) }()
 
 	m.planLock.Lock()
 	defer m.planLock.Unlock()
@@ -137,7 +136,7 @@ func (m *PlanManager) AppendLayer(layer *plan.Layer, inner bool) error {
 		return &LabelExists{Label: layer.Label}
 	}
 
-	newPlan, err := m.appendLayer(layer, inner)
+	newPlan, err := m.appendLayer(ctx, layer, inner)
 	return err
 }
 
@@ -147,12 +146,11 @@ func (m *PlanManager) AppendLayer(layer *plan.Layer, inner bool) error {
 // true if a combine operation gets demoted to an append operation (due to the
 // layer not yet existing), and if the configuration layer is located in a
 // sub-directory (see AppendLayer).
-func (m *PlanManager) CombineLayer(layer *plan.Layer, inner bool) error {
-	ctx := context.TODO()
+func (m *PlanManager) CombineLayer(ctx context.Context, layer *plan.Layer, inner bool) error {
 	defer trace.StartRegion(ctx, "pebble.plan.combine-layer").End()
 	trace.Logf(ctx, "layer", "label=%s", layer.Label)
 	var newPlan *plan.Plan
-	defer func() { m.callChangeListeners(newPlan) }()
+	defer func() { m.callChangeListeners(ctx, newPlan) }()
 
 	m.planLock.Lock()
 	defer m.planLock.Unlock()
@@ -161,12 +159,12 @@ func (m *PlanManager) CombineLayer(layer *plan.Layer, inner bool) error {
 	if index < 0 {
 		// No layer found with this label, append new one.
 		var err error
-		newPlan, err = m.appendLayer(layer, inner)
+		newPlan, err = m.appendLayer(ctx, layer, inner)
 		return err
 	}
 
 	// Layer found with this label, combine into that one.
-	combined, err := plan.CombineLayers(found, layer)
+	combined, err := plan.CombineLayers(ctx, found, layer)
 	if err != nil {
 		return err
 	}
@@ -177,7 +175,7 @@ func (m *PlanManager) CombineLayer(layer *plan.Layer, inner bool) error {
 	newLayers := make([]*plan.Layer, len(m.plan.Layers))
 	copy(newLayers, m.plan.Layers)
 	newLayers[index] = combined
-	newPlan, err = m.updatePlanLayers(newLayers)
+	newPlan, err = m.updatePlanLayers(ctx, newLayers)
 	if err != nil {
 		return err
 	}
@@ -204,7 +202,7 @@ func (m *PlanManager) CombineLayer(layer *plan.Layer, inner bool) error {
 // we can at most insert the layer as the last entry in the
 // sub-directory. However, this insert is only allowed if explicitly
 // requested by the user (inner=true).
-func (m *PlanManager) appendLayer(newLayer *plan.Layer, inner bool) (*plan.Plan, error) {
+func (m *PlanManager) appendLayer(ctx context.Context, newLayer *plan.Layer, inner bool) (*plan.Plan, error) {
 	// The starting index and order assumes no existing layers.
 	newIndex := 0
 	newOrder := 1000
@@ -254,7 +252,7 @@ func (m *PlanManager) appendLayer(newLayer *plan.Layer, inner bool) (*plan.Plan,
 	// Insert into a copy: slices.Insert shifts in place when the slice has
 	// spare capacity, which would change the live plan before validation.
 	newLayers := slices.Insert(slices.Clone(m.plan.Layers), newIndex, newLayer)
-	newPlan, err := m.updatePlanLayers(newLayers)
+	newPlan, err := m.updatePlanLayers(ctx, newLayers)
 	if err != nil {
 		return nil, err
 	}
@@ -262,8 +260,8 @@ func (m *PlanManager) appendLayer(newLayer *plan.Layer, inner bool) (*plan.Plan,
 	return newPlan, nil
 }
 
-func (m *PlanManager) updatePlanLayers(layers []*plan.Layer) (*plan.Plan, error) {
-	combined, err := plan.CombineLayers(layers...)
+func (m *PlanManager) updatePlanLayers(ctx context.Context, layers []*plan.Layer) (*plan.Plan, error) {
+	combined, err := plan.CombineLayers(ctx, layers...)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +272,7 @@ func (m *PlanManager) updatePlanLayers(layers []*plan.Layer) (*plan.Plan, error)
 		LogTargets: combined.LogTargets,
 		Sections:   combined.Sections,
 	}
-	err = p.Validate()
+	err = p.Validate(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +304,7 @@ func findLayer(layers []*plan.Layer, label string) (int, *plan.Layer) {
 }
 
 // Ensure implements StateManager.Ensure.
-func (m *PlanManager) Ensure() error {
+func (m *PlanManager) Ensure(ctx context.Context) error {
 	return nil
 }
 
@@ -316,9 +314,9 @@ func (m *PlanManager) Ensure() error {
 //
 // NOTE: This functionality should be redesigned (moved out of the plan manager)
 // as the plan manager should not be concerned with schema section details.
-func (m *PlanManager) SetServiceArgs(serviceArgs map[string][]string) error {
+func (m *PlanManager) SetServiceArgs(ctx context.Context, serviceArgs map[string][]string) error {
 	var newPlan *plan.Plan
-	defer func() { m.callChangeListeners(newPlan) }()
+	defer func() { m.callChangeListeners(ctx, newPlan) }()
 
 	m.planLock.Lock()
 	defer m.planLock.Unlock()
@@ -346,6 +344,6 @@ func (m *PlanManager) SetServiceArgs(serviceArgs map[string][]string) error {
 		}
 	}
 
-	newPlan, err := m.appendLayer(newLayer, false)
+	newPlan, err := m.appendLayer(ctx, newLayer, false)
 	return err
 }

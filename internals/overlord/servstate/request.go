@@ -1,6 +1,7 @@
 package servstate
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/canonical/pebble/internals/overlord/state"
@@ -57,7 +58,7 @@ func Stop(s *state.State, lanes [][]string) (*state.TaskSet, error) {
 
 // StopRunning creates and returns a task set for stopping all running
 // services. It returns a nil *TaskSet if there are no services to stop.
-func StopRunning(s *state.State, m *ServiceManager) (*state.TaskSet, error) {
+func StopRunning(ctx context.Context, s *state.State, m *ServiceManager) (*state.TaskSet, error) {
 	lanes, err := servicesToStop(m)
 	if err != nil {
 		return nil, err
@@ -68,7 +69,7 @@ func StopRunning(s *state.State, m *ServiceManager) (*state.TaskSet, error) {
 
 	// One change to stop them all.
 	s.Lock()
-	defer s.Unlock()
+	defer s.UnlockWithContext(ctx)
 	taskSet, err := Stop(s, lanes)
 	if err != nil {
 		return nil, err

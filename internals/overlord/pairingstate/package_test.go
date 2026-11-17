@@ -15,6 +15,7 @@
 package pairingstate_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -59,7 +60,7 @@ func (ps *pairingSuite) SetUpTest(c *C) {
 }
 
 func (ps *pairingSuite) TearDownTest(c *C) {
-	ps.overlord.Stop()
+	ps.overlord.Stop(context.Background())
 	plan.UnregisterSectionExtension(pairingstate.PairingField)
 }
 
@@ -81,7 +82,7 @@ func (ps *pairingSuite) newManager(c *C, s *pairingstate.PairingDetails) {
 	c.Assert(err, IsNil)
 
 	ps.overlord.AddManager(ps.manager)
-	err = ps.overlord.StartUp()
+	err = ps.overlord.StartUp(context.Background())
 	c.Assert(err, IsNil)
 }
 
@@ -100,7 +101,7 @@ func (ps *pairingSuite) updatePlan(mode pairingstate.Mode) {
 	config := &pairingstate.PairingConfig{Mode: mode}
 	testPlan := plan.NewPlan()
 	testPlan.Sections[pairingstate.PairingField] = config
-	ps.manager.PlanChanged(testPlan)
+	ps.manager.PlanChanged(context.Background(), testPlan)
 }
 
 // expectWindowEnableDisable makes sure that the pairing window enable phase,
@@ -177,13 +178,13 @@ func generateTestClientCert(c *C) *x509.Certificate {
 func parseCombineLayers(yamls []string) (*plan.Layer, error) {
 	var layers []*plan.Layer
 	for i, yaml := range yamls {
-		layer, err := plan.ParseLayer(i, fmt.Sprintf("test-plan-layer-%v", i), []byte(yaml))
+		layer, err := plan.ParseLayer(context.Background(), i, fmt.Sprintf("test-plan-layer-%v", i), []byte(yaml))
 		if err != nil {
 			return nil, err
 		}
 		layers = append(layers, layer)
 	}
-	return plan.CombineLayers(layers...)
+	return plan.CombineLayers(context.Background(), layers...)
 }
 
 // layerYAML presents a plan as a marshalled YAML string.
